@@ -1,6 +1,6 @@
 # OpenMW Extremely ~~Shit~~ Simple Mod Manager
 
-A simple-yet-powerful, controller-friendly mod manager for **OpenMW**, designed primarily for Linux-based systems and handheld devices. ESMM handles mod extraction, configuration, and load order management through an intuitive, tabbed interface.
+A simple-yet-powerful, controller-friendly mod manager for **OpenMW**, designed primarily for Linux-based handheld devices. ESMM handles mod extraction, configuration, and load order management through an intuitive, tabbed interface.
 
 ## About
 
@@ -72,6 +72,7 @@ The file is split into a `[data]` section for `data=` paths and a `[content]` se
 -   Files with the same priority are sorted alphabetically.
 
 ### Example `openmw_esmm.ini`
+
 ```ini
 ##
 ## Data Path Sorting Rules
