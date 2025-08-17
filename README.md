@@ -26,53 +26,6 @@ Managing an OpenMW mod list on a handheld device or a Linux desktop can be cumbe
     -   Uses a simple, powerful `openmw_esmm.ini` rules file to apply a community-or-user-defined load order.
     -   Supports wildcard matching for flexible and powerful rules.
 
-## Dependencies
-
-To build ESMM, you will need the following development libraries:
-
--   **SDL2** (`libsdl2-dev`)
--   **SDL2_ttf** (`libsdl2-ttf-dev`)
--   **Boost** (`libboost-all-dev` or specifically `libboost-filesystem-dev` and `libboost-program-options-dev`)
-
-On a Debian-based system (like Ubuntu, Raspberry Pi OS, etc.), you can install them with:
-```bash
-sudo apt-get install libsdl2-dev libsdl2-ttf-dev libboost-filesystem-dev libboost-program-options-dev
-```
-
-## Building
-
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/your-username/openmw-esmm.git
-    cd openmw-esmm
-    ```
-
-2.  **Get Dear ImGui:**
-    This project uses Dear ImGui as a dependency. You will need to download it and place the required files in the `libs/imgui/` directory.
-    -   Download the latest release from the [Dear ImGui GitHub repository](https://github.com/ocornut/imgui/releases).
-    -   Create the directories: `mkdir -p libs/imgui/backends`
-    -   From the ImGui zip file, copy the following files into `libs/imgui/`:
-        -   `imconfig.h`
-        -   `imgui.h`, `imgui.cpp`
-        -   `imgui_draw.cpp`
-        -   `imgui_internal.h`
-        -   `imgui_tables.cpp`
-        -   `imgui_widgets.cpp`
-        -   `imstb_rectpack.h`, `imstb_textedit.h`, `imstb_truetype.h`
-    -   Copy the following backend files into `libs/imgui/backends/`:
-        -   `imgui_impl_sdl2.h`, `imgui_impl_sdl2.cpp`
-        -   `imgui_impl_sdlrenderer2.h`, `imgui_impl_sdlrenderer2.cpp`
-
-3.  **Compile with CMake:**
-    ```bash
-    mkdir build
-    cd build
-    cmake ..
-    make
-    ```
-    The final executable, `openmw_esmm`, will be located in the `build` directory.
-
-
 ### Default File Structure
 
 By default, ESMM looks for files and directories relative to its own location. For the easiest setup, use the following structure:
@@ -124,40 +77,86 @@ The file is split into a `[data]` section for `data=` paths and a `[content]` se
 ## Data Path Sorting Rules
 ##
 [data]
-# 100 - Essential Patches
-Patch for Purists=100
+# 1000 - Essential Patches
+Patch for Purists=1000
 
-# 200 - Core Fixes & Optimizations
-Morrowind Optimization Patch/*=200
+# 2000 - Core Fixes & Optimizations
+Morrowind Optimization Patch/*=2000
 
-# 300 - Major Overhauls
-Project Atlas/*=300
+# 3000 - Major Overhauls
+Project Atlas/*=3000
 
-# 700 - Body & Armor Mods
-Better Bodies/*/Data Files=700
-Better *=701
+# 7000 - Body & Armor Mods
+Better Bodies/*/Data Files=7000
+Better *=7001
 
-# 900 - Everything else (catch-all)
-*=900
+# 9000 - Everything else (catch-all)
+*=9000
 
 ##
 ## Content File (Plugin) Sorting Rules
 ##
 [content]
-# 100 - Master Files and their patches
+# Core files.
 Morrowind.esm=0
 Tribunal.esm=1
 Bloodmoon.esm=2
-Patch for Purists.esm=100
-Patch for Purists*.ESP=101
+# 1000 - Master Files and their patches
+Patch for Purists.esm=1000
+Patch for Purists*.ESP=1001
 
-# 700 - Body & Armor Plugins
-Better*.esp=700
-Better*.esm=700
+# 7000 - Body & Armor Plugins
+Better*=7000
 
-# 900 - Everything else (catch-all)
-*=900
+# 9000 - Everything else (catch-all)
+*=9000
 ```
+
+## Dependencies
+
+To build ESMM, you will need the following development libraries:
+
+-   **SDL2** (`libsdl2-dev`)
+-   **SDL2_ttf** (`libsdl2-ttf-dev`)
+-   **Boost** (`libboost-all-dev` or specifically `libboost-filesystem-dev` and `libboost-program-options-dev`)
+
+On a Debian-based system (like Ubuntu, Raspberry Pi OS, etc.), you can install them with:
+```bash
+sudo apt-get install libsdl2-dev libsdl2-ttf-dev libboost-filesystem-dev libboost-program-options-dev
+```
+
+## Building
+
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/your-username/openmw-esmm.git
+    cd openmw-esmm
+    ```
+
+2.  **Get Dear ImGui:**
+    This project uses Dear ImGui as a dependency. You will need to download it and place the required files in the `libs/imgui/` directory.
+    -   Download the latest release from the [Dear ImGui GitHub repository](https://github.com/ocornut/imgui/releases).
+    -   Create the directories: `mkdir -p libs/imgui/backends`
+    -   From the ImGui zip file, copy the following files into `libs/imgui/`:
+        -   `imconfig.h`
+        -   `imgui.h`, `imgui.cpp`
+        -   `imgui_draw.cpp`
+        -   `imgui_internal.h`
+        -   `imgui_tables.cpp`
+        -   `imgui_widgets.cpp`
+        -   `imstb_rectpack.h`, `imstb_textedit.h`, `imstb_truetype.h`
+    -   Copy the following backend files into `libs/imgui/backends/`:
+        -   `imgui_impl_sdl2.h`, `imgui_impl_sdl2.cpp`
+        -   `imgui_impl_sdlrenderer2.h`, `imgui_impl_sdlrenderer2.cpp`
+
+3.  **Compile with CMake:**
+    ```bash
+    mkdir build
+    cd build
+    cmake ..
+    make
+    ```
+    The final executable, `openmw_esmm`, will be located in the `build` directory.
 
 ## Credits & Third-Party Libraries
 
