@@ -39,7 +39,6 @@ int main(int argc, char* argv[]) {
         ("mod-data",     po::value<std::string>(), "Path to extracted mod data directory (e.g., mod_data/)")
         ("config-file",  po::value<std::string>(), "Path to openmw.cfg file")
         ("rules-file",   po::value<std::string>(), "Path to openmw_esmm.ini sorting rules")
-        ("debug-scan", "Run debug scanner and exit")
     ;
 
     po::variables_map vm;
@@ -58,7 +57,7 @@ int main(int argc, char* argv[]) {
     ctx.exec_7zz             = vm.count("7zz")          ? fs::path(vm["7zz"].as<std::string>())          : base_path / "7zzs";
     ctx.path_mod_archives    = vm.count("mod-archives") ? fs::path(vm["mod-archives"].as<std::string>()) : base_path / "mods/";
     ctx.path_mod_data        = vm.count("mod-data")     ? fs::path(vm["mod-data"].as<std::string>())     : base_path / "mod_data/";
-    ctx.path_openmw_cfg      = vm.count("config-file")  ? fs::path(vm["config-file"].as<std::string>())  : base_path / "openmw.cfg";
+    ctx.path_openmw_cfg      = vm.count("config-file")  ? fs::path(vm["config-file"].as<std::string>())  : base_path / "openmw/openmw.cfg";
     ctx.path_openmw_esmm_ini = vm.count("rules-file")   ? fs::path(vm["rules-file"].as<std::string>())   : base_path / "openmw_esmm.ini";
 
     // --- Standard Init ---

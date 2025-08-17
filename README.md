@@ -1,251 +1,173 @@
-# OpenMW Extremely ~~Simple~~ Stupid Mod Manager
+# OpenMW Extremely ~~Shit~~ Simple Mod Manager
 
+A simple-yet-powerful, controller-friendly mod manager for **OpenMW**, designed primarily for Linux-based systems and handheld devices. ESMM handles mod extraction, configuration, and load order management through an intuitive, tabbed interface.
 
-Mods are extracted into the `ports/openmw/mod_data` directory with their own subfolder. (ie: `ports/openmw/mod_data/Patch for Purists/` is a single mod).
+## About
 
-The mod itself can have multiple `data=` directories.
+Managing an OpenMW mod list on a handheld device or a Linux desktop can be cumbersome. ESMM (Extremely Simple Mod Manager) aims to simplify the process by providing the essential tools in a single, easy-to-navigate application with full gamepad support. It automates mod extraction, helps configure complex mods, and gives you full control over your data and content load orders.
 
-Currently the rules are for data directories:
+## Features
 
-- Contains a `Data Files/` directory at the top level, ***and*** other directories with `Data Files/` as a subdirectory.
-  The main `Data Files/` directory is mandatory, the other directories are optional.
-- Contains a `Data Files/` directory at the top level, ***and*** other directories without `Data Files/`.
-  The man `Data Files/` directory is mandatory, the other directories can be ignored for now.
-- Contains directories with numbers at the beginning as you can see below with "Project Atlas".
-  If there are multiple directories with the same number, then only one of them can be enabled at a time. If it contains `00` it must be enabled for any of the other directories to be enabled.
-- Contains a multiple top level directories with a sub `Data Files` directory.
-  Any or all of the directories can be enabled, show the name of the 
+-   **Tabbed Interface:** All features are organized into clean, accessible tabs.
+-   **Archive Management:**
+    -   Automatically scans your `mods` directory for new archives (`.7z`, `.rar`, `.zip`).
+    -   Detects mod status: **[New]**, **[Installed]**, or **[Update Available]** with color-coding.
+    -   Extracts, updates, or deletes selected mods with the press of a button.
+    -   "Toggle New" and "Toggle Updates" buttons for easy batch management.
+-   **Mod Configuration:**
+    -   A clear, indented-list view of each mod's available options.
+    -   Enable or disable entire mods with a single checkbox.
+    -   Configure individual components, including support for single-choice (e.g., `00 Core`, `01 Option A`) and multiple-choice groups.
+-   **Data Path & Content File Ordering:**
+    -   Dedicated tabs to view and reorder your active `data=` paths and `content=` files.
+    -   **Controller-Friendly Reordering:** Use **L1/R1** on a focused item to move it up or down in the load order.
+    -   Enable or disable individual plugins (`.esp`/`.esm`/`*.omwscripts`/`*.omwaddon`) in the content list.
+-   **Smart Auto-Sorting:**
+    -   Uses a simple, powerful `openmw_esmm.ini` rules file to apply a community-or-user-defined load order.
+    -   Supports wildcard matching for flexible and powerful rules.
 
-The `content=` files can only be enabled if the directory that contains it is enabled.
+## Dependencies
 
+To build ESMM, you will need the following development libraries:
 
-## Patch for Purists
+-   **SDL2** (`libsdl2-dev`)
+-   **SDL2_ttf** (`libsdl2-ttf-dev`)
+-   **Boost** (`libboost-all-dev` or specifically `libboost-filesystem-dev` and `libboost-program-options-dev`)
 
-This has 1 `data=` directory, and 3 `content=` files.
-
-- mod_data/Patch for Purists
-  - Patch for Purists - Book Typos.ESP
-  - Patch for Purists - Semi-Purist Fixes.ESP
-  - Patch for Purists.esm
-
-## Real Signposts
-
-This has 1 `data=` directory, and 1 `content=` file.
-
-- mod_data/Real Signposts
-  - RealSignposts.esp
-
-## Better Morrowind Armor ENG
-
-This has 1 `data=` mandatory directory, and 7 optional `data=` directories, and 7 `content=` files.
-
-- mod_data/Better Morrowind Armor ENG/Data Files
-  - Better Morrowind Armor DeFemm(a).ESP
-  - Better Morrowind Armor DeFemm(o).ESP
-  - Better Morrowind Armor DeFemm(r).ESP
-  - Better Morrowind Armor.esp
-- mod_data/Better Morrowind Armor ENG/Complete Armor Joints/Data Files
-  - Complete Armor Joints.esp
-- mod_data/Better Morrowind Armor ENG/Imperial Steel Cuirass with belt/Data Files
-- mod_data/Better Morrowind Armor ENG/female Steel Cuirass from LeFemm Armor/Data Files
-- mod_data/Better Morrowind Armor ENG/patch for HiRez Armors- Native Styles V2/Data Files
-- mod_data/Better Morrowind Armor ENG/patch for LeFemmArmor/Data Files
-  - LeFemmArmor.esp
-- mod_data/Better Morrowind Armor ENG/patch for Snow Prince Armor Redux/Data Files
-  - Snow Prince Armor Redux.ESP
-- mod_data/Better Morrowind Armor ENG/patch for installation without Tribunal/Data Files
-
-## Graphic Herbalism MWSE - OpenMW
-
-This has 1 mandatory `data=` directory and 1 optional `data=` directory, and 4 `content=` files.
-
-- mod_data/Graphic Herbalism MWSE - OpenMW/00 Core + Vanilla Meshes
-- mod_data/Graphic Herbalism MWSE - OpenMW/01 Optional - Smoothed Meshes
-
-## Morrowind Optimization Patch
-
-This has 1 mandator `data=` directory and 4 optional `data=` directories, with 2 `content=` files.
-
-- mod_data/Morrowind Optimization Patch/00 Core
-- mod_data/Morrowind Optimization Patch/01 Lake Fjalding Anti-Suck
-  - Lake Fjalding Anti-Suck.ESP
-- mod_data/Morrowind Optimization Patch/02 Weapon Sheathing Patch
-- mod_data/Morrowind Optimization Patch/03 Chuzei Fix
-  - chuzei_helm_no_neck.esp
-- mod_data/Morrowind Optimization Patch/04 Better Vanilla Textures
-- mod_data/Morrowind Optimization Patch/05 Graphic Herbalism Patch
-
-## Morrowind Optimization Patch
-
-This has 1 `data=` directory, and 1 `content=` file.
-
-- mod_data/Morrowind Weapons Expansion/Data Files
-  - Weapons Expansion Morrowind.esp
-
-# OpenMW Containers Animated
-
-This has 1 `data=` directory, and 1 `content=` file.
-
-- mod_data/OpenMW Containers Animated/Containers Animated
-  - Containers Animated.esp
-
-# OpenMW Containers Animated
-
-This has 1 mandatory `data=` directory and 9 optional `data=` directories, with 0 `content=` files.
-
-- mod_data/OpenMW Containers Animated/Containers Animated
-  - Containers Animated.esp
-- mod_data/OpenMW Containers Animated/Optional/kollops
-
-- mod_data/Project Atlas/00 Core
-- mod_data/Project Atlas/01 Textures - Intelligent Textures
-- mod_data/Project Atlas/01 Textures - MET
-- mod_data/Project Atlas/01 Textures - Vanilla
-- mod_data/Project Atlas/02 Urns - Smoothed
-- mod_data/Project Atlas/03 Redware - Smoothed
-- mod_data/Project Atlas/04 Emperor Parasols - Smoothed
-- mod_data/Project Atlas/05 Wood Poles - Hi-Res Texture
-- mod_data/Project Atlas/06 Glow in the Dahrk Patch
-- mod_data/Project Atlas/07 Graphic Herbalism Patch
-- mod_data/Project Atlas/08 ILFAS Patch
-- mod_data/Project Atlas/09 BC Mushrooms - Normal - Glowing Bitter Coast Patch
-- mod_data/Project Atlas/09 BC Mushrooms - Smoothed
-- mod_data/Project Atlas/09 BC Mushrooms - Smoothed - Glowing Bitter Coast Patch
-
-# WeaponSheathing1.6-OpenMW
-
-This has one `data=` directory.
-
-- mod_data/WeaponSheathing1.6-OpenMW/Data Files
-- mod_data/WeaponSheathing1.6-OpenMW/Extras/alternate draw animations/animation compilation
-- mod_data/WeaponSheathing1.6-OpenMW/Extras/alternate draw animations/vanilla
-
-# Better Bodies
-
-Technically has only 1 selectable `data=` directory, but we are going to play by the rules as stated above.
-
-- mod_data/Better Bodies/Nude/Data Files
-  - Better Bodies.esp
-- mod_data/Better Bodies/Peanut Gallery/Data Files
-  - Better Bodies.esp
-- mod_data/Better Bodies/Underwear/Data Files
-  - Better Bodies.esp
-
-
-
-# openmw.cfg
-
-This file is broken up into 3 parts:
-
-## 1. Engine Data
-
-The top of the file has a bunch of settings that the engine needs to run, they are possibly configurable but they are beyond the scope of this project.
-
-```ini
-fallback=LightAttenuation_UseConstant,0
-fallback=LightAttenuation_ConstantValue,0.0
-fallback=LightAttenuation_UseLinear,1
-fallback=LightAttenuation_LinearMethod,1
-fallback=LightAttenuation_LinearValue,3.0
-fallback=LightAttenuation_LinearRadiusMult,1.0
-fallback=LightAttenuation_UseQuadratic,0
-fallback=LightAttenuation_QuadraticMethod,2
-fallback=LightAttenuation_QuadraticValue,16.0
-fallback=LightAttenuation_QuadraticRadiusMult,1.0
-fallback=LightAttenuation_OutQuadInLin,0
-
+On a Debian-based system (like Ubuntu, Raspberry Pi OS, etc.), you can install them with:
+```bash
+sudo apt-get install libsdl2-dev libsdl2-ttf-dev libboost-filesystem-dev libboost-program-options-dev
 ```
 
-This part goes on.
+## Building
 
-## 2. Data files
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/your-username/openmw-esmm.git
+    cd openmw-esmm
+    ```
 
-The `data=` directives need to be able to be ordered correctly. The core `ports/openmw/data/` directory is always first.
+2.  **Get Dear ImGui:**
+    This project uses Dear ImGui as a dependency. You will need to download it and place the required files in the `libs/imgui/` directory.
+    -   Download the latest release from the [Dear ImGui GitHub repository](https://github.com/ocornut/imgui/releases).
+    -   Create the directories: `mkdir -p libs/imgui/backends`
+    -   From the ImGui zip file, copy the following files into `libs/imgui/`:
+        -   `imconfig.h`
+        -   `imgui.h`, `imgui.cpp`
+        -   `imgui_draw.cpp`
+        -   `imgui_internal.h`
+        -   `imgui_tables.cpp`
+        -   `imgui_widgets.cpp`
+        -   `imstb_rectpack.h`, `imstb_textedit.h`, `imstb_truetype.h`
+    -   Copy the following backend files into `libs/imgui/backends/`:
+        -   `imgui_impl_sdl2.h`, `imgui_impl_sdl2.cpp`
+        -   `imgui_impl_sdlrenderer2.h`, `imgui_impl_sdlrenderer2.cpp`
+
+3.  **Compile with CMake:**
+    ```bash
+    mkdir build
+    cd build
+    cmake ..
+    make
+    ```
+    The final executable, `openmw_esmm`, will be located in the `build` directory.
 
 
+### Default File Structure
+
+By default, ESMM looks for files and directories relative to its own location. For the easiest setup, use the following structure:
+
+```
+openmw/
+├── 7zzs                  # (The 7-zip executable)
+├── mods/                 # (Place your mod archives like .zip, .7z, .rar here)
+├── mod_data/             # (ESMM will extract mods into this directory)
+├── openmw/openmw.cfg     # (Your main OpenMW configuration file)
+├── openmw_esmm.ini       # (Optional auto-sorting rules file)
+└── openmw_esmm           # (The executable you just built)
+```
+
+### Command-Line Arguments
+
+You can override the default paths using command-line arguments.
+
+| Argument         | Description                                        |
+| ---------------- | -------------------------------------------------- |
+| `--help`         | Show the help message.                             |
+| `--7zz`          | Path to the `7zzs` executable.                     |
+| `--mod-archives` | Path to the directory containing your mod archives. |
+| `--mod-data`     | Path to the directory where mods are extracted.    |
+| `--config-file`  | Path to your `openmw.cfg` file.                    |
+| `--rules-file`   | Path to your `openmw_esmm.ini` sorting rules file. |
+
+**Example:**
+```bash
+./openmw_esmm --mod-data /home/user/games/openmw/mod_data/ --config-file /home/user/.config/openmw/openmw.cfg
+```
+
+## Auto-Sorting (`openmw_esmm.ini`)
+
+The auto-sorting feature allows you to define a prioritized load order via a simple INI file. This file should be named `openmw_esmm.ini` and placed next to the executable.
+
+The file is split into a `[data]` section for `data=` paths and a `[content]` section for `content=` files.
+
+-   Rules are processed from top to bottom.
+-   Wildcards (`*`, `?`) are supported.
+-   The first rule that matches a file determines its priority.
+-   You can define a priority level with a comment (`# 100`). All subsequent rules will use that priority until a new level is defined.
+-   You can also set priority explicitly with an equals sign (`=`).
+-   Files with the same priority are sorted alphabetically.
+
+### Example `openmw_esmm.ini`
 ```ini
 ##
-## Core `ports/openmw/data/` directory.
+## Data Path Sorting Rules
 ##
-data=/mnt/mmc/roms/ports/openmw/data/
+[data]
+# 100 - Essential Patches
+Patch for Purists=100
 
-## 
-## Mod `data=` directives.
-## --BEGIN DATA--
-data=/mnt/mmc/ports/openmw/mod_data/Morrowind Optimization Patch/00 Core
-data=/mnt/mmc/ports/openmw/mod_data/Morrowind Optimization Patch/01 Lake Fjalding Anti-Suck
-data=/mnt/mmc/ports/openmw/mod_data/Morrowind Optimization Patch/02 Weapon Sheathing Patch
-data=/mnt/mmc/ports/openmw/mod_data/Morrowind Optimization Patch/03 Chuzei Fix
-data=/mnt/mmc/ports/openmw/mod_data/Morrowind Optimization Patch/04 Better Vanilla Textures
-data=/mnt/mmc/ports/openmw/mod_data/Morrowind Optimization Patch/05 Graphic Herbalism Patch
-data=/mnt/mmc/ports/openmw/mod_data/Better Bodies/Underwear/Data Files
-data=/mnt/mmc/ports/openmw/mod_data/Better Morrowind Armor ENG/Complete Armor Joints/Data Files
-data=/mnt/mmc/ports/openmw/mod_data/Better Morrowind Armor ENG/Data Files
-data=/mnt/mmc/ports/openmw/mod_data/Better Morrowind Armor ENG/Imperial Steel Cuirass with belt/Data Files
-data=/mnt/mmc/ports/openmw/mod_data/Better Morrowind Armor ENG/female Steel Cuirass from LeFemm Armor/Data Files
-data=/mnt/mmc/ports/openmw/mod_data/Better Morrowind Armor ENG/patch for HiRez Armors- Native Styles V2/Data Files
-data=/mnt/mmc/ports/openmw/mod_data/Better Morrowind Armor ENG/patch for LeFemmArmor/Data Files
-data=/mnt/mmc/ports/openmw/mod_data/Better Morrowind Armor ENG/patch for Snow Prince Armor Redux/Data Files
-data=/mnt/mmc/ports/openmw/mod_data/Graphic Herbalism MWSE - OpenMW/00 Core + Vanilla Meshes
-data=/mnt/mmc/ports/openmw/mod_data/Graphic Herbalism MWSE - OpenMW/01 Optional - Smoothed Meshes
-data=/mnt/mmc/ports/openmw/mod_data/Morrowind Weapons Expansion/Data Files
-data=/mnt/mmc/ports/openmw/mod_data/OpenMW Containers Animated/Containers Animated
-data=/mnt/mmc/ports/openmw/mod_data/Patch for Purists
-data=/mnt/mmc/ports/openmw/mod_data/Project Atlas/00 Core
-data=/mnt/mmc/ports/openmw/mod_data/Project Atlas/01 Textures - Vanilla
-data=/mnt/mmc/ports/openmw/mod_data/Project Atlas/02 Urns - Smoothed
-data=/mnt/mmc/ports/openmw/mod_data/Project Atlas/03 Redware - Smoothed
-data=/mnt/mmc/ports/openmw/mod_data/Project Atlas/04 Emperor Parasols - Smoothed
-data=/mnt/mmc/ports/openmw/mod_data/Project Atlas/05 Wood Poles - Hi-Res Texture
-data=/mnt/mmc/ports/openmw/mod_data/Project Atlas/07 Graphic Herbalism Patch
-data=/mnt/mmc/ports/openmw/mod_data/Project Atlas/08 ILFAS Patch
-data=/mnt/mmc/ports/openmw/mod_data/Project Atlas/09 BC Mushrooms - Smoothed
-data=/mnt/mmc/ports/openmw/mod_data/Real Signposts
-data=/mnt/mmc/ports/openmw/mod_data/WeaponSheathing1.6-OpenMW/Data Files
-## --END DATA--
+# 200 - Core Fixes & Optimizations
+Morrowind Optimization Patch/*=200
 
-fallback-archive=Morrowind.bsa
-fallback-archive=Tribunal.bsa
-fallback-archive=Bloodmoon.bsa
+# 300 - Major Overhauls
+Project Atlas/*=300
+
+# 700 - Body & Armor Mods
+Better Bodies/*/Data Files=700
+Better *=701
+
+# 900 - Everything else (catch-all)
+*=900
+
+##
+## Content File (Plugin) Sorting Rules
+##
+[content]
+# 100 - Master Files and their patches
+Morrowind.esm=0
+Tribunal.esm=1
+Bloodmoon.esm=2
+Patch for Purists.esm=100
+Patch for Purists*.ESP=101
+
+# 700 - Body & Armor Plugins
+Better*.esp=700
+Better*.esm=700
+
+# 900 - Everything else (catch-all)
+*=900
 ```
 
+## Credits & Third-Party Libraries
 
-## 3. Content files.
+This project would not be possible without the following amazing open-source libraries:
 
-After the `fallback-archive=` directives we then need to define the `content=` directives. The three core morrowind files must be present, then mod `content=` files need to be specified.
+-   [**Dear ImGui**](https://github.com/ocornut/imgui): For the entire graphical user interface.
+-   [**SDL2** & **SDL2_ttf**](https://www.libsdl.org/): For windowing, rendering, and input.
+-   [**Boost**](https://www.boost.org/): For robust filesystem operations and command-line parsing.
+-   [**DejaVu Sans Mono**](https://dejavu-fonts.github.io/): The default font used for the UI, included in the `assets/` directory.
 
-```
-##
-## Core morrowind files.
-##
-content=Morrowind.esm
-content=Tribunal.esm
-content=Bloodmoon.esm
-## --BEGIN CONTENT--
-content=Patch for Purists - Book Typos.ESP
-content=Patch for Purists - Semi-Purist Fixes.ESP
-content=Patch for Purists.esm
-content=RealSignposts.esp
-content=Better Morrowind Armor DeFemm(a).ESP
-content=Better Morrowind Armor DeFemm(o).ESP
-content=Better Morrowind Armor DeFemm(r).ESP
-content=Better Morrowind Armor.esp
-content=Complete Armor Joints.esp
-content=LeFemmArmor.esp
-content=Snow Prince Armor Redux.ESP
-content=Lake Fjalding Anti-Suck.ESP
-content=chuzei_helm_no_neck.esp
-content=Weapons Expansion Morrowind.esp
-content=Containers Animated.esp
-content=Containers Animated.esp
-content=Better Bodies.esp
-## --END CONTENT--
+## License
 
-```
-
-## Finally.
-
-Now the order of all these files are important.
-
-So we need to be able to adjust the order of the `data=` directives, and the order of the `content=` directives.
-
+This project is licensed under the MIT License. See the `LICENSE` file for details.
