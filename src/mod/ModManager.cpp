@@ -231,51 +231,45 @@ void ModManager::update_active_lists() {
     active_data_paths = new_active_data_paths;
 
 
-    // --- PART 2: CONTENT FILES (same logic) ---
+    // --- PART 2: CONTENT FILES (REWRITTEN) ---
 
-    // 1. Get a map of all plugins that SHOULD be active and their source mods
-    std::map<std::string, std::string> enabled_plugins; // map<plugin_name, source_mod>
+    // 1. Get a map of all plugins that are discoverable from enabled data paths
+    std::map<std::string, std::string> available_plugins; // map<plugin_name, source_mod>
     for (const auto& mod : mod_definitions) {
         if (!mod.enabled) continue;
         for (const auto& group : mod.option_groups) {
             for (const auto& option : group.options) {
                 if (option.enabled) {
                     for (const auto& plugin_name : option.discovered_plugins) {
-                        enabled_plugins[plugin_name] = mod.name;
+                        available_plugins[plugin_name] = mod.name;
                     }
                 }
             }
         }
     }
 
-    // 2. Build a new list, preserving order and enabled state of existing plugins
+    // 2. Build the new list.
     std::vector<ContentFile> new_active_content_files;
     std::set<std::string> plugins_in_new_list;
-    for (const auto& content_file : active_content_files) {
-        if (enabled_plugins.count(content_file.name)) {
-            new_active_content_files.push_back(content_file); // Keep existing object to preserve its enabled state
-            plugins_in_new_list.insert(content_file.name);
+
+    // First pass: Iterate through the CURRENT list. Keep any plugin that is still available.
+    // This preserves both user order AND the user's enabled/disabled state.
+    for (const auto& existing_content_file : active_content_files) {
+        if (available_plugins.count(existing_content_file.name)) {
+            new_active_content_files.push_back(existing_content_file);
+            plugins_in_new_list.insert(existing_content_file.name);
         }
     }
 
-    // 3. Add any newly enabled plugins to the end of the list
-    for (const auto& mod : mod_definitions) {
-        if (!mod.enabled) continue;
-        for (const auto& group : mod.option_groups) {
-            for (const auto& option : group.options) {
-                if (option.enabled) {
-                    for (const auto& plugin_name : option.discovered_plugins) {
-                        if (plugins_in_new_list.find(plugin_name) == plugins_in_new_list.end()) {
-                            new_active_content_files.push_back({plugin_name, true, mod.name});
-                            plugins_in_new_list.insert(plugin_name);
-                        }
-                    }
-                }
-            }
+    // Second pass: Add any brand new plugins that have become available and weren't in the old list.
+    // These are always added to the end and default to 'enabled'.
+    for (const auto& pair : available_plugins) {
+        if (plugins_in_new_list.find(pair.first) == plugins_in_new_list.end()) {
+            new_active_content_files.push_back({pair.first, true, pair.second});
         }
     }
     
-    // 4. Replace the old list
+    // 3. Replace the old list
     active_content_files = new_active_content_files;
 }
 

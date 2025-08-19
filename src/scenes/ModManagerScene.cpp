@@ -6,12 +6,14 @@
 #include "../mod/ArchiveManager.h"
 #include "../mod/ConfigManager.h"
 #include "../mod/SortManager.h"
+#include "../mod/MloxManager.h" // Add this
 #include "imgui.h"
 #include "imgui_internal.h"
 #include <algorithm>
 #include <vector>
 #include <fstream>
 #include <iostream>
+#include <set>
 
 void handle_option_check(ModOption& option) {
     if (!option.enabled) return;
@@ -28,8 +30,10 @@ struct ModManagerScene::State {
     ArchiveManager archive_manager;
     ConfigManager config_manager;
     SortManager sort_manager;
+    MloxManager mlox_manager;
 
     bool rules_loaded = false;
+    bool mlox_rules_loaded = false; // Separate flag for mlox
     bool is_loaded = false;
     
     int focused_data_idx = -1;
@@ -45,61 +49,62 @@ ModManagerScene::~ModManagerScene() { delete p_state; }
 
 void ModManagerScene::on_enter(AppContext& ctx) {
     if (p_state->is_loaded) {
-        // Rescan archives every time for updates
         p_state->archive_manager.scan_archives(ctx.path_mod_archives, ctx.path_mod_data);
         p_state->archive_selection.assign(p_state->archive_manager.archives.size(), 0);
         return;
     }
 
-    fs::path ini_path = ctx.path_openmw_esmm_ini;
-    p_state->rules_loaded = p_state->sort_manager.load_rules(ini_path);
-    if (!p_state->rules_loaded) {
-        std::cout << "Info: openmw_esmm.ini not found or failed to load. Auto-sort will be disabled." << std::endl;
-    }
-
+    // Discover all mods
     p_state->mod_manager.scan_mods(ctx.path_mod_data);
     std::sort(p_state->mod_manager.mod_definitions.begin(), p_state->mod_manager.mod_definitions.end(),
         [](const ModDefinition& a, const ModDefinition& b) { return a.name < b.name; });
 
-    fs::path config_path = ctx.path_openmw_cfg;
+    // Load all rule files
+    fs::path ini_path = ctx.path_config_dir / "openmw_esmm.ini";
+    fs::path base_mlox_path = ctx.path_config_dir / "mlox_base.txt";
+    fs::path user_mlox_path = ctx.path_config_dir / "mlox_user.txt";
+    p_state->rules_loaded = p_state->sort_manager.load_rules(ini_path);
+    p_state->mlox_rules_loaded = p_state->mlox_manager.load_rules({base_mlox_path, user_mlox_path});
 
-    if (p_state->config_manager.load(config_path)) {
-        // 1. Sync the CHECKBOX states from the loaded config
-        p_state->mod_manager.sync_state_from_config(p_state->config_manager.data_paths, p_state->config_manager.content_files);
-        
-        // 2. CRITICAL: Initialize the active lists with the EXACT order from the config file.
-        p_state->mod_manager.active_data_paths.clear();
-        for (const auto& p_str : p_state->config_manager.data_paths) {
-            p_state->mod_manager.active_data_paths.push_back(fs::path(p_str));
-        }
-        
-        // We need to build the ContentFile list from the config's string list
-        p_state->mod_manager.active_content_files.clear();
-        std::map<std::string, std::string> all_plugins; // Map all discovered plugins to their source mod
-        for(const auto& mod : p_state->mod_manager.mod_definitions) {
-            for(const auto& group : mod.option_groups) {
-                for(const auto& option : group.options) {
-                    for(const auto& plugin : option.discovered_plugins) {
-                        all_plugins[plugin] = mod.name;
-                    }
-                }
-            }
-        }
-        for (const auto& c_str : p_state->config_manager.content_files) {
-            std::string source_mod = all_plugins.count(c_str) ? all_plugins[c_str] : "Unknown";
-            p_state->mod_manager.active_content_files.push_back({c_str, true, source_mod});
-        }
+    // Load the user's config file into our structured buckets
+    p_state->config_manager.load(ctx.path_openmw_cfg);
+    
+    // Combine mod_content and disabled_content to sync checkbox states
+    std::vector<std::string> all_content_for_sync = p_state->config_manager.mod_content;
+    all_content_for_sync.insert(all_content_for_sync.end(), p_state->config_manager.disabled_content.begin(), p_state->config_manager.disabled_content.end());
+    p_state->mod_manager.sync_state_from_config(p_state->config_manager.mod_data, all_content_for_sync);
+    
+    // Populate active lists from the config, preserving order
+    p_state->mod_manager.active_data_paths.clear();
+    for (const auto& p_str : p_state->config_manager.mod_data) {
+        p_state->mod_manager.active_data_paths.push_back(fs::path(p_str));
+    }
+    
+    p_state->mod_manager.active_content_files.clear();
+    // Build a map of all discoverable plugins to find their source mod
+    std::map<std::string, std::string> all_plugins_map;
+    for(const auto& mod : p_state->mod_manager.mod_definitions) { /* ... build all_plugins_map ... */ }
+    
+    // Create a set of enabled plugins for quick lookup
+    std::set<std::string> enabled_content_set(p_state->config_manager.mod_content.begin(), p_state->config_manager.mod_content.end());
 
-    } else {
-        // If no config, run an initial update to populate lists with defaults
-        p_state->mod_manager.update_active_lists();
+    // Populate the list using all_content_for_sync to preserve order and disabled state
+    for (const auto& c_str : all_content_for_sync) {
+        std::string source_mod = all_plugins_map.count(c_str) ? all_plugins_map[c_str] : "Unknown";
+        bool is_enabled = enabled_content_set.count(c_str) > 0;
+        p_state->mod_manager.active_content_files.push_back({c_str, is_enabled, source_mod});
     }
 
+    // Run update_active_lists to add any newly discovered plugins to the end
+    p_state->mod_manager.update_active_lists();
+
+    // Scan archives
     p_state->archive_manager.scan_archives(ctx.path_mod_archives, ctx.path_mod_data);
     p_state->archive_selection.assign(p_state->archive_manager.archives.size(), 0);
     
     p_state->is_loaded = true;
 }
+
 
 void ModManagerScene::handle_event(SDL_Event& e, AppContext& ctx) { /* Empty */ }
 void ModManagerScene::on_exit(AppContext& ctx) {}
@@ -283,12 +288,24 @@ void ModManagerScene::render(AppContext& ctx) {
         // --- TAB 3: CONTENT FILE ORDER ---
         if (ImGui::BeginTabItem("Content File Order")) {
             ImGui::Text("A to toggle, D-Pad to navigate, L1/R1 to reorder.");
-            ImGui::SameLine();
-            if (p_state->rules_loaded) {
-                if (ImGui::Button("[Auto-Sort]")) {
-                    p_state->sort_manager.sort_content_files(p_state->mod_manager.active_content_files);
+    
+            if (p_state->mlox_rules_loaded) {
+                ImGui::SameLine();
+                if (ImGui::Button("[Mlox Auto-Sort]")) {
+                    // Gather all necessary search paths and pass them to the sorter.
+                    std::vector<fs::path> base_paths;
+                    for (const auto& s : p_state->config_manager.base_data) {
+                        base_paths.emplace_back(s);
+                    }
+                    
+                    p_state->mlox_manager.sort_content_files(
+                        p_state->mod_manager.active_content_files,
+                        base_paths, // The base game data paths
+                        p_state->mod_manager.active_data_paths // The active mod data paths in their current order
+                    );
                 }
             }
+
             ImGui::Separator();
             ImGui::BeginChild("ContentList", ImVec2(0, -50), true);
 
@@ -316,6 +333,27 @@ void ModManagerScene::render(AppContext& ctx) {
                 }
             }
             ImGui::EndChild();
+
+            ImGui::SameLine();
+            // --- NEW: Pane for Mlox Messages ---
+            ImGui::BeginChild("MloxMessages", ImVec2(0, -50), true);
+            ImGui::Text("Mlox Messages:");
+            ImGui::Separator();
+            if (p_state->focused_content_idx != -1) {
+                const auto& content = p_state->mod_manager.active_content_files[p_state->focused_content_idx];
+                auto messages = p_state->mlox_manager.get_messages_for_plugin(content.name);
+                if (messages.empty()) {
+                    ImGui::TextDisabled("(No messages for this plugin)");
+                } else {
+                    for (const auto& msg : messages) {
+                        ImGui::TextWrapped("%s", msg.c_str());
+                    }
+                }
+            } else {
+                ImGui::TextDisabled("(Focus a plugin to see messages)");
+            }
+            ImGui::EndChild();
+
             ImGui::EndTabItem();
         }
         ImGui::EndTabBar();
@@ -324,21 +362,25 @@ void ModManagerScene::render(AppContext& ctx) {
     if (state_changed) { p_state->mod_manager.update_active_lists(); }
 
     if (ImGui::Button("Save and Exit", ImVec2(150, 40))) {
-        // p_state->mod_manager.update_active_lists();
-        fs::path config_path = ctx.path_openmw_cfg;
+        // 1. Populate the ConfigManager's MOD lists from our UI state.
+        // The BASE lists are already in memory from load() and will be preserved.
+        p_state->config_manager.mod_data.clear();
+        for (const auto& path : p_state->mod_manager.active_data_paths) {
+            p_state->config_manager.mod_data.push_back(path.string());
+        }
 
-        p_state->config_manager.data_paths.clear();
-        for (const auto& path : p_state->mod_manager.active_data_paths) p_state->config_manager.data_paths.push_back(path.string());
-        
-        // FIX #2: Manually convert vector<ContentFile> to vector<string>
-        p_state->config_manager.content_files.clear();
+        p_state->config_manager.mod_content.clear();
+        p_state->config_manager.disabled_content.clear();
         for (const auto& content_file : p_state->mod_manager.active_content_files) {
             if (content_file.enabled) {
-                p_state->config_manager.content_files.push_back(content_file.name);
+                p_state->config_manager.mod_content.push_back(content_file.name);
+            } else {
+                p_state->config_manager.disabled_content.push_back(content_file.name);
             }
         }
         
-        p_state->config_manager.save(config_path);
+        // 2. Save the file. The ConfigManager will write everything back correctly.
+        p_state->config_manager.save(ctx.path_openmw_cfg);
         next_scene = std::make_unique<MainMenuScene>();
     }
     ImGui::SameLine();

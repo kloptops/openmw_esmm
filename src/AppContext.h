@@ -20,7 +20,7 @@ struct AppContext {
     fs::path path_mod_archives;
     fs::path path_mod_data;
     fs::path path_openmw_cfg;
-    fs::path path_openmw_esmm_ini;
+    fs::path path_config_dir;
 
     ~AppContext();
 };

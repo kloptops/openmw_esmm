@@ -5,20 +5,22 @@
 
 namespace fs = boost::filesystem;
 
-class ConfigManager
-{
+class ConfigManager {
 public:
-    // Reads an openmw.cfg file
     bool load(const fs::path& config_path);
-    // Writes the changes back to the file
     bool save(const fs::path& config_path);
 
-    // Publicly accessible state
-    std::vector<std::string> data_paths;
-    std::vector<std::string> content_files;
+    // Lists to hold the final state for saving
+    std::vector<std::string> base_data;
+    std::vector<std::string> mod_data;
+    std::vector<std::string> base_content;
+    std::vector<std::string> mod_content;
+    std::vector<std::string> disabled_content; // For #content= lines
 
 private:
-    std::vector<std::string> lines_before_data;
-    std::vector<std::string> lines_between;
-    std::vector<std::string> lines_after_content;
+    // Buckets for all other lines to ensure we don't lose them
+    std::vector<std::string> lines_before_base_data;
+    std::vector<std::string> lines_between_data;
+    std::vector<std::string> lines_between_content;
+    std::vector<std::string> lines_after_mod_content;
 };
