@@ -80,6 +80,8 @@ void ModManagerScene::fix_load_order_and_save() {
     // Fix content files
     auto& content_files = mod_manager.active_content_files;
     const std::vector<std::string> masters = {"Morrowind.esm", "Tribunal.esm", "Bloodmoon.esm"};
+
+    // Iterate forwards to find, then backwards to insert
     for (int i = masters.size() - 1; i >= 0; --i) {
         auto it_content = std::find_if(content_files.begin(), content_files.end(), [&](const ContentFile& cf){
             return cf.name == masters[i];
@@ -87,6 +89,7 @@ void ModManagerScene::fix_load_order_and_save() {
         if (it_content != content_files.end()) {
             ContentFile master_file = *it_content;
             content_files.erase(it_content);
+            master_file.enabled = true; // <-- THE FIX: Force it to be enabled
             content_files.insert(content_files.begin(), master_file);
         }
     }
@@ -206,7 +209,14 @@ void ModManagerScene::render() {
             ImGui::BeginChild("ModTree", ImVec2(0, -50), true);
             
             for (auto& mod : mod_manager.mod_definitions) {
-                // Mod name itself is unique, so this is fine.
+                // --- THIS IS THE FIX ---
+                // Identify if this is the special, non-disable-able base game mod.
+                bool is_base_game_mod = (mod.name == "The Elder Scrolls III: Morrowind");
+
+                if (is_base_game_mod) {
+                    ImGui::BeginDisabled(); // Disable the widget
+                }
+
                 if (ImGui::Checkbox(mod.name.c_str(), &mod.enabled)) {
                     state_changed = true;
                     if (mod.enabled) {
@@ -216,19 +226,34 @@ void ModManagerScene::render() {
                     }
                 }
 
+                if (is_base_game_mod) {
+                    mod.enabled = true; // Forcibly re-enable it just in case.
+                    ImGui::EndDisabled(); // Re-enable widgets for the next item
+                }
+
                 if (mod.enabled) {
                     ImGui::Indent();
                     for (auto& group : mod.option_groups) {
                         ImGui::TextDisabled("  - %s -", group.name.c_str());
                         ImGui::Indent();
                         for (auto& option : group.options) {
-                            // --- THIS IS THE FIX ---
-                            // Create a unique ID by combining the option, group, and mod names.
-                            // The part after ## is used for the ID but is not displayed.
+                            // --- THIS IS THE SECOND PART OF THE FIX ---
+                            // Check if this specific option is the base game's data path.
+                            bool is_base_data_option = is_base_game_mod && fs::exists(option.path / "Morrowind.esm");
+
+                            if (is_base_data_option) {
+                                ImGui::BeginDisabled();
+                            }
+
                             std::string unique_id = option.name + "##" + mod.name + group.name;
                             if (ImGui::Checkbox(unique_id.c_str(), &option.enabled)) {
                                 handle_option_check(option);
                                 state_changed = true;
+                            }
+
+                            if (is_base_data_option) {
+                                option.enabled = true; // And forcibly re-enable it.
+                                ImGui::EndDisabled();
                             }
                         }
                         ImGui::Unindent();
@@ -367,10 +392,11 @@ void ModManagerScene::render() {
         const auto& content = mod_manager.active_content_files;
         
         bool data_ok = !data.empty() && fs::exists(data.front() / "Morrowind.esm");
+        // Check for presence, order, AND enabled status
         bool content_ok = content.size() >= 3 &&
-                          content[0].name == "Morrowind.esm" &&
-                          content[1].name == "Tribunal.esm" &&
-                          content[2].name == "Bloodmoon.esm";
+                          content[0].name == "Morrowind.esm" && content[0].enabled &&
+                          content[1].name == "Tribunal.esm" && content[1].enabled &&
+                          content[2].name == "Bloodmoon.esm" && content[2].enabled;
 
         if (data_ok && content_ok) {
             save_and_exit();
@@ -394,7 +420,7 @@ void ModManagerScene::render() {
         ImGui::Text("Your load order has critical issues!\n\n"
                     "- Morrowind.esm must be in the first data path.\n"
                     "- Morrowind.esm, Tribunal.esm, and Bloodmoon.esm\n"
-                    "  must be the first three content files, in order.\n\n"
+                    "  must be the first three ENABLED content files, in order.\n\n"
                     "Saving this configuration may cause OpenMW to fail to launch.\n");
         ImGui::Separator();
 

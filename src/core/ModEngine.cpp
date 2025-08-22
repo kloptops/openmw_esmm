@@ -162,7 +162,35 @@ void ModEngine::initialize() {
     
     m_archive_manager.scan_archives(m_app_context.path_mod_archives, m_app_context.path_mod_data);
 
+    LOG_INFO("Performing initial sort of core game files...");
+
+    // 1. Force the main data path to the top of the data list.
+    auto& data_paths = m_mod_manager.active_data_paths;
+    auto it_data = std::find_if(data_paths.begin(), data_paths.end(), [](const fs::path& p) {
+        return fs::exists(p / "Morrowind.esm");
+    });
+    if (it_data != data_paths.end() && it_data != data_paths.begin()) {
+        fs::path game_data_path = *it_data;
+        data_paths.erase(it_data);
+        data_paths.insert(data_paths.begin(), game_data_path);
+    }
+
+    // 2. Force the core ESMs to the top of the content list in the correct order.
+    auto& content_files = m_mod_manager.active_content_files;
+    const std::vector<std::string> masters = {"Bloodmoon.esm", "Tribunal.esm", "Morrowind.esm"}; // Process in reverse for insertion at the front
+    for (const auto& master_name : masters) {
+        auto it_content = std::find_if(content_files.begin(), content_files.end(), [&](const ContentFile& cf){
+            return cf.name == master_name;
+        });
+        if (it_content != content_files.end()) {
+            ContentFile master_file = *it_content;
+            content_files.erase(it_content);
+            content_files.insert(content_files.begin(), master_file);
+        }
+    }
+
     m_is_initialized = true;
+
     LOG_INFO("ModEngine: Initialization complete.");
 }
 
