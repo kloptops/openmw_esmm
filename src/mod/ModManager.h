@@ -6,6 +6,8 @@
 
 namespace fs = boost::filesystem;
 
+std::vector<std::string> find_plugins_in_path(const fs::path& path);
+
 // Forward declare to resolve circular dependency
 struct ModOptionGroup;
 

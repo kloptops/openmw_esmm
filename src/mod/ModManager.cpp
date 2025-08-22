@@ -37,7 +37,7 @@ static bool is_data_directory(const fs::path& dir_path) {
 }
 
 // Helper to find all plugins within a given path (non-recursive)
-static std::vector<std::string> find_plugins_in_path(const fs::path& path) {
+std::vector<std::string> find_plugins_in_path(const fs::path& path) {
     std::vector<std::string> plugins;
     if (!fs::is_directory(path)) return plugins;
     try {
@@ -190,7 +190,8 @@ void ModManager::sync_state_from_config(const std::vector<std::string>& active_d
 void ModManager::update_active_lists() {
     // --- PART 1: DATA PATHS ---
 
-    // 1. Get a set of all data paths that SHOULD be active from the mod configuration
+    // 1. Get a set of all data paths that SHOULD be active from the mod configuration.
+    // This is now the single source of truth.
     std::set<fs::path> enabled_data_paths;
     for (const auto& mod : mod_definitions) {
         if (!mod.enabled) continue;
@@ -203,33 +204,26 @@ void ModManager::update_active_lists() {
         }
     }
 
-    // 2. Build a new list, preserving the order of currently active items
+    // 2. Preserve the order of existing paths as much as possible, and remove disabled ones.
     std::vector<fs::path> new_active_data_paths;
+    std::set<fs::path> paths_in_new_list;
+
     for (const auto& path : active_data_paths) {
         if (enabled_data_paths.count(path)) {
             new_active_data_paths.push_back(path);
+            paths_in_new_list.insert(path);
         }
     }
 
-    // 3. Add any newly enabled paths to the end of the list
-    for (const auto& mod : mod_definitions) {
-        if (!mod.enabled) continue;
-        for (const auto& group : mod.option_groups) {
-            for (const auto& option : group.options) {
-                if (option.enabled) {
-                    bool found = false;
-                    for(const auto& p : new_active_data_paths) if(p == option.path) found = true;
-                    if (!found) {
-                        new_active_data_paths.push_back(option.path);
-                    }
-                }
-            }
+    // 3. Add any newly enabled paths that weren't in the original list.
+    for (const auto& path : enabled_data_paths) {
+        if (paths_in_new_list.find(path) == paths_in_new_list.end()) {
+            new_active_data_paths.push_back(path);
         }
     }
     
-    // 4. Replace the old list with the new, order-preserved list
+    // 4. Replace the old list.
     active_data_paths = new_active_data_paths;
-
 
     // --- PART 2: CONTENT FILES (REWRITTEN) ---
 

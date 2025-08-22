@@ -9,6 +9,8 @@
 // To turn off the logging for a final build, comment this line out.
 #define DEBUG_SORTER
 
+#define MAX_PRIORITY 99999
+
 // Simple wildcard match (fnmatch style)
 // ? matches any single character
 // * matches any sequence of characters (including an empty sequence)
@@ -40,6 +42,22 @@ static bool wildcard_match(const std::string& text, const std::string& pattern) 
     return patt_it == pattern.end();
 }
 
+// Finds the correct relative path for sorting rules based on a list of possible root directories.
+static std::string get_sortable_string(const fs::path& path, const std::vector<fs::path>& mod_source_dirs) {
+    // The base game data path is a special case; its rule is just "Data Files" or "Data Files/"
+    if (fs::exists(path / "Morrowind.esm")) {
+        return "Data Files/";
+    }
+
+    for (const auto& source_dir : mod_source_dirs) {
+        if (!source_dir.empty() && path.string().find(source_dir.string()) == 0) {
+            return path.lexically_relative(source_dir).string();
+        }
+    }
+    // Fallback for paths not found in a source dir (should be rare)
+    return path.filename().string();
+}
+
 bool SortManager::load_rules(const fs::path& ini_path) {
     data_rules.clear();
     content_rules.clear();
@@ -68,7 +86,7 @@ bool SortManager::load_rules(const fs::path& ini_path) {
 
         if (current_section != Section::NONE) {
             std::string pattern;
-            int priority = 9999; // Default high priority for rules without one
+            int priority = MAX_PRIORITY; // Default high priority for rules without one
             size_t eq_pos = line.find('=');
 
             if (eq_pos != std::string::npos) {
@@ -79,6 +97,9 @@ bool SortManager::load_rules(const fs::path& ini_path) {
             } else {
                 pattern = line;
             }
+
+            // Clamp priority between 0 and MAX_PRIORITY
+            priority = ((priority < 0) ? 0 : ((priority <= MAX_PRIORITY) ? priority : MAX_PRIORITY));
 
             if (!pattern.empty()) {
                 if (current_section == Section::DATA) {
@@ -110,20 +131,33 @@ static int get_priority(const std::vector<SortRule>& rules, const std::string& n
     #ifdef DEBUG_SORTER
     std::cout << "    -> No specific rule matched. Using default priority 9999." << std::endl;
     #endif
-    return 9999; // Default priority if no match
+
+    return MAX_PRIORITY; // Default priority if no match
 }
 
 
-// --- UPDATED SORTING FUNCTIONS with DEBUG LOGGING ---
-void SortManager::sort_data_paths(std::vector<fs::path>& data_paths, const fs::path& mod_data_dir) {
+void SortManager::sort_data_paths(std::vector<fs::path>& data_paths, const std::vector<fs::path>& mod_source_dirs) {
     #ifdef DEBUG_SORTER
     std::cout << "\n--- DEBUG: Auto-Sorting Data Paths ---\n";
     #endif
 
+    // --- Find and preserve the base game data path ---
+    fs::path game_data_path;
+    auto it = std::find_if(data_paths.begin(), data_paths.end(), [](const fs::path& p) {
+        return fs::exists(p / "Morrowind.esm");
+    });
+    if (it != data_paths.end()) {
+        game_data_path = *it;
+        data_paths.erase(it);
+        #ifdef DEBUG_SORTER
+        std::cout << "  Found game data path: " << game_data_path.string() << ". Setting as highest priority.\n";
+        #endif
+    }
+
     std::stable_sort(data_paths.begin(), data_paths.end(),
         [&](const fs::path& a, const fs::path& b) {
-            std::string a_rel = a.lexically_relative(mod_data_dir).string();
-            std::string b_rel = b.lexically_relative(mod_data_dir).string();
+            std::string a_rel = get_sortable_string(a, mod_source_dirs);
+            std::string b_rel = get_sortable_string(b, mod_source_dirs);
             
             int a_priority = get_priority(data_rules, a_rel);
             int b_priority = get_priority(data_rules, b_rel);
@@ -139,10 +173,15 @@ void SortManager::sort_data_paths(std::vector<fs::path>& data_paths, const fs::p
             return a_lower < b_lower;
         });
     
+    // --- Insert the game data path back at the beginning ---
+    if (!game_data_path.empty()) {
+        data_paths.insert(data_paths.begin(), game_data_path);
+    }
+    
     #ifdef DEBUG_SORTER
     std::cout << "--- Sort Complete. Final Order: ---\n";
     for(const auto& path : data_paths) {
-        std::cout << "  " << path.lexically_relative(mod_data_dir).string() << std::endl;
+        std::cout << "  " << get_sortable_string(path, mod_source_dirs) << std::endl;
     }
     std::cout << "-------------------------------------\n\n";
     #endif

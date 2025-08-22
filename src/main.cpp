@@ -2,10 +2,8 @@
 #include "AppContext.h"
 #include "utils/Logger.h"
 #include "utils/Utils.h"
-#include "scenes/Scene.h"
-#include "scenes/MainMenuScene.h"
-#include "mod/ConfigManager.h"
-#include "mod/MloxManager.h"
+#include "core/StateMachine.h"
+#include "core/ModEngine.h"
 
 // ImGui Includes
 #include "imgui.h"
@@ -31,8 +29,9 @@ int main(int argc, char* argv[]) {
     } else {
         base_path = fs::current_path();
     }
+
     std::cout << "Base path detected as: " << base_path.string() << std::endl;
-    
+
     // --- Command-Line Argument Parsing ---
     po::options_description desc("Allowed options");
     desc.add_options()
@@ -44,7 +43,6 @@ int main(int argc, char* argv[]) {
         ("config-dir",   po::value<std::string>(), "Directory for esmm configs (ini, mlox)")
         ("quiet",                                  "Quieten down logging")
         ("verbose",                                "Enable verbose debug logging")
-        ("debug-sort",                             "Run the mlox sorter on the current config and exit") // <-- NEW
     ;
 
     po::variables_map vm;
@@ -66,57 +64,10 @@ int main(int argc, char* argv[]) {
         LOG_DEBUG("Verbose logging enabled.");
     }
 
-
-    AppContext tmp_ctx;
-    tmp_ctx.path_config_dir = vm.count("config-dir")  ? fs::path(vm["config-dir"].as<std::string>())  : base_path;
-    tmp_ctx.path_mod_data   = vm.count("mod-data")    ? fs::path(vm["mod-data"].as<std::string>())    : base_path / "mod_data/";
-    tmp_ctx.path_openmw_cfg = vm.count("config-file") ? fs::path(vm["config-file"].as<std::string>()) : base_path / "openmw.cfg";
-    
-    // --- Debug Sorter Mode ---
-    if (vm.count("debug-sort")) {
-        ConfigManager cfg;
-        MloxManager mlox;
-
-        if (!cfg.load(tmp_ctx.path_openmw_cfg)) {
-            std::cerr << "ERROR: Could not load openmw.cfg for debug sort." << std::endl;
-            return 1;
-        }
-
-        fs::path base_mlox_path = tmp_ctx.path_config_dir / "mlox_base.txt";
-        fs::path user_mlox_path = tmp_ctx.path_config_dir / "mlox_user.txt";
-        mlox.load_rules({base_mlox_path, user_mlox_path});
-
-        // --- THIS IS THE FIX ---
-        // 1. Create a single, combined list of all content files from the config.
-        std::vector<std::string> all_content_from_cfg = cfg.base_content;
-        all_content_from_cfg.insert(all_content_from_cfg.end(), cfg.mod_content.begin(), cfg.mod_content.end());
-
-        // 2. Create the ContentFile vector for sorting.
-        std::vector<ContentFile> content_to_sort;
-        for (const auto& name : all_content_from_cfg) {
-            content_to_sort.push_back(ContentFile{name, true, "Unknown"});
-        }
-
-        // 3. Create the necessary path vectors.
-        std::vector<fs::path> base_data_paths;
-        for (const auto& s : cfg.base_data) {
-            base_data_paths.push_back(fs::path(s));
-        }
-        std::vector<fs::path> mod_data_paths;
-        for (const auto& s : cfg.mod_data) {
-            mod_data_paths.push_back(fs::path(s));
-        }
-
-        // 4. Call the sorter with the correct arguments.
-        mlox.sort_content_files(content_to_sort, base_data_paths, mod_data_paths);
-        
-        return 0;
-    }
-    
-    // --- REGULAR APPLICATION STARTUP ---
-    AppContext& ctx = tmp_ctx;
-
-    // Set paths with priority: command-line > default relative to executable
+    AppContext ctx;
+    ctx.path_config_dir = vm.count("config-dir")  ? fs::path(vm["config-dir"].as<std::string>())  : base_path;
+    ctx.path_mod_data   = vm.count("mod-data")    ? fs::path(vm["mod-data"].as<std::string>())    : base_path / "mod_data/";
+    ctx.path_openmw_cfg = vm.count("config-file") ? fs::path(vm["config-file"].as<std::string>()) : base_path / "openmw.cfg";
     ctx.exec_7zz             = vm.count("7zz")          ? fs::path(vm["7zz"].as<std::string>())          : base_path / "7zzs";
     ctx.path_mod_archives    = vm.count("mod-archives") ? fs::path(vm["mod-archives"].as<std::string>()) : base_path / "mods/";
 
@@ -157,15 +108,12 @@ int main(int argc, char* argv[]) {
     }
 
     // --- Scene & Main Loop ---
-    std::unique_ptr<Scene> current_scene = std::make_unique<MainMenuScene>();
-    current_scene->on_enter(ctx);
+    StateMachine machine(ctx);
+    machine.push_state(StateID::MainMenu); // Push the first scene
 
-    while (ctx.running)
-    {
-        // Event handling
+    while (ctx.running) {
         SDL_Event e;
-        while (SDL_PollEvent(&e) != 0)
-        {
+        while (SDL_PollEvent(&e) != 0) {
             ImGui_ImplSDL2_ProcessEvent(&e);
             if (e.type == SDL_QUIT)
             {
@@ -174,30 +122,16 @@ int main(int argc, char* argv[]) {
             }
 
             // Let the scene handle everything else
-            current_scene->handle_event(e, ctx);
+            machine.handle_event(e);
         }
+        
+        machine.update();
 
-        // --- ImGui New Frame ---
+        // Rendering
         ImGui_ImplSDLRenderer2_NewFrame();
         ImGui_ImplSDL2_NewFrame();
         ImGui::NewFrame();
-
-        // Update
-        current_scene->update(ctx);
-
-        // Scene transition
-        if (next_scene)
-        {
-            current_scene->on_exit(ctx);
-            current_scene = std::move(next_scene);
-            current_scene->on_enter(ctx);
-        }
-
-        // --- Rendering ---
-        // Let the scene render its ImGui UI
-        current_scene->render(ctx);
-
-        // Finalize ImGui render and draw to screen
+        machine.render();
         SDL_SetRenderDrawColor(ctx.renderer, 20, 20, 40, 255);
         SDL_RenderClear(ctx.renderer);
         ImGui::Render();
@@ -207,11 +141,9 @@ int main(int argc, char* argv[]) {
     }
 
     // --- Shutdown ---
-    current_scene->on_exit(ctx);
     ImGui_ImplSDLRenderer2_Shutdown();
     ImGui_ImplSDL2_Shutdown();
     ImGui::DestroyContext();
     
-    int final_exit_code = ctx.exit_code;
-    return final_exit_code;
+    return ctx.exit_code;
 }

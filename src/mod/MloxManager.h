@@ -24,6 +24,9 @@ public:
     // Retrieves any notes or warnings for a specific plugin
     std::vector<std::string> get_messages_for_plugin(const std::string& plugin_name) const;
 
+    // Are any rules loaded?
+    bool rules_loaded() { return (!dependencies.empty() || !near_start_plugins.empty() && near_end_plugins.empty()); }
+
 private:
     // A map where: key is a plugin, value is a list of plugins that must load BEFORE it.
     std::map<std::string, std::vector<std::string>> dependencies;

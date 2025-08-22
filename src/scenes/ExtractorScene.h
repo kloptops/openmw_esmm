@@ -1,6 +1,6 @@
 #pragma once
 #include "Scene.h"
-#include "mod/ArchiveManager.h" // For ArchiveInfo
+#include "../mod/ArchiveManager.h" // For ArchiveInfo
 #include <vector>
 #include <string>
 #include <thread>
@@ -8,22 +8,23 @@
 
 class ExtractorScene : public Scene {
 public:
-    // NEW: Constructor to accept a list of archives
-    ExtractorScene(std::vector<ArchiveInfo> archives_to_extract);
+    // Constructor now takes the StateMachine and the archives
+    ExtractorScene(StateMachine& machine, std::vector<ArchiveInfo> archives_to_extract);
     ~ExtractorScene();
 
-    void on_enter(AppContext& ctx) override;
-    void handle_event(SDL_Event& e, AppContext& ctx) override;
-    void render(AppContext& ctx) override;
-    void on_exit(AppContext& ctx) override;
+    void on_enter() override;
+    void on_exit() override;
+    void handle_event(SDL_Event& e) override;
+    void render() override;
 
 private:
-    std::vector<ArchiveInfo> archives_to_extract; // Store the list
-    std::vector<std::string> log_lines;
-    std::mutex log_mutex;
-    std::thread worker_thread;
-    bool is_finished = false;
-    std::string status_message = "Initializing...";
+    // Worker function now takes a const reference to AppContext
+    void extraction_worker(const AppContext& ctx);
 
-    void extraction_worker(AppContext& ctx);
+    std::vector<ArchiveInfo> m_archives_to_extract;
+    std::thread m_worker_thread;
+    std::mutex m_log_mutex;
+    std::vector<std::string> m_log_lines;
+    std::string m_status_message = "Initializing...";
+    bool m_is_finished = false;
 };

@@ -1,12 +1,6 @@
 #include "ModManagerScene.h"
-#include "MainMenuScene.h"
-#include "ExtractorScene.h"
-#include "../AppContext.h"
-#include "../mod/ModManager.h"
-#include "../mod/ArchiveManager.h"
-#include "../mod/ConfigManager.h"
-#include "../mod/SortManager.h"
-#include "../mod/MloxManager.h" // Add this
+#include "../core/StateMachine.h"
+#include "../core/ModEngine.h"
 #include "imgui.h"
 #include "imgui_internal.h"
 #include <algorithm>
@@ -24,133 +18,135 @@ void handle_option_check(ModOption& option) {
     }
 }
 
-// --- SIMPLIFIED STATE ---
-struct ModManagerScene::State {
-    ModManager mod_manager;
-    ArchiveManager archive_manager;
-    ConfigManager config_manager;
-    SortManager sort_manager;
-    MloxManager mlox_manager;
+// --- NEW DISPLAY HELPER FUNCTION ---
+static std::string get_display_path(const fs::path& path, const ModManager& mod_manager, const AppContext& ctx) {
+    for (const auto& mod : mod_manager.mod_definitions) {
+        for (const auto& group : mod.option_groups) {
+            for (const auto& option : group.options) {
+                if (option.path == path) {
+                    // Found the owner mod and option
+                    bool is_external = mod.root_path.string().find(ctx.path_mod_data.string()) != 0;
+                    
+                    if (mod.name == "The Elder Scrolls III: Morrowind") {
+                        return mod.name + "/" + option.name;
+                    }
 
-    bool rules_loaded = false;
-    bool mlox_rules_loaded = false; // Separate flag for mlox
-    bool is_loaded = false;
-    
+                    std::string relative_part = path.lexically_relative(mod.root_path).string();
+                    return (is_external ? "[External] " : "") + mod.name + "/" + relative_part;
+                }
+            }
+        }
+    }
+    // Fallback if no owner is found
+    return path.string();
+}
+
+// The State is now much simpler, only holding UI state
+enum class ActiveTab { ARCHIVES, CONFIG, CONTENT_ORDER, DATA_ORDER, VALIDATION };
+struct ModManagerScene::State {
+    ActiveTab current_tab = ActiveTab::ARCHIVES;
     int focused_data_idx = -1;
     int focused_content_idx = -1;
     bool focus_request_data = false;
     bool focus_request_content = false;
-
     std::vector<char> archive_selection;
+    bool show_save_warning = false; // NEW
 };
 
-ModManagerScene::ModManagerScene() : p_state(new State()) {}
+ModManagerScene::ModManagerScene(StateMachine& machine) : Scene(machine) {
+    p_state = new State();
+}
 ModManagerScene::~ModManagerScene() { delete p_state; }
 
-void ModManagerScene::on_enter(AppContext& ctx) {
-    if (p_state->is_loaded) {
-        p_state->archive_manager.scan_archives(ctx.path_mod_archives, ctx.path_mod_data);
-        p_state->archive_selection.assign(p_state->archive_manager.archives.size(), 0);
-        return;
-    }
-
-    // Discover all mods
-    p_state->mod_manager.scan_mods(ctx.path_mod_data);
-    std::sort(p_state->mod_manager.mod_definitions.begin(), p_state->mod_manager.mod_definitions.end(),
-        [](const ModDefinition& a, const ModDefinition& b) { return a.name < b.name; });
-
-    // Load all rule files
-    fs::path ini_path = ctx.path_config_dir / "openmw_esmm.ini";
-    fs::path base_mlox_path = ctx.path_config_dir / "mlox_base.txt";
-    fs::path user_mlox_path = ctx.path_config_dir / "mlox_user.txt";
-    p_state->rules_loaded = p_state->sort_manager.load_rules(ini_path);
-    p_state->mlox_rules_loaded = p_state->mlox_manager.load_rules({base_mlox_path, user_mlox_path});
-
-    // Load the user's config file into our structured buckets
-    p_state->config_manager.load(ctx.path_openmw_cfg);
-    
-    // Combine mod_content and disabled_content to sync checkbox states
-    std::vector<std::string> all_content_for_sync = p_state->config_manager.mod_content;
-    all_content_for_sync.insert(all_content_for_sync.end(), p_state->config_manager.disabled_content.begin(), p_state->config_manager.disabled_content.end());
-    p_state->mod_manager.sync_state_from_config(p_state->config_manager.mod_data, all_content_for_sync);
-    
-    // Populate active lists from the config, preserving order
-    p_state->mod_manager.active_data_paths.clear();
-    for (const auto& p_str : p_state->config_manager.mod_data) {
-        p_state->mod_manager.active_data_paths.push_back(fs::path(p_str));
-    }
-    
-    p_state->mod_manager.active_content_files.clear();
-    // Build a map of all discoverable plugins to find their source mod
-    std::map<std::string, std::string> all_plugins_map;
-    for(const auto& mod : p_state->mod_manager.mod_definitions) { /* ... build all_plugins_map ... */ }
-    
-    // Create a set of enabled plugins for quick lookup
-    std::set<std::string> enabled_content_set(p_state->config_manager.mod_content.begin(), p_state->config_manager.mod_content.end());
-
-    // Populate the list using all_content_for_sync to preserve order and disabled state
-    for (const auto& c_str : all_content_for_sync) {
-        std::string source_mod = all_plugins_map.count(c_str) ? all_plugins_map[c_str] : "Unknown";
-        bool is_enabled = enabled_content_set.count(c_str) > 0;
-        p_state->mod_manager.active_content_files.push_back({c_str, is_enabled, source_mod});
-    }
-
-    // Run update_active_lists to add any newly discovered plugins to the end
-    p_state->mod_manager.update_active_lists();
-
-    // Scan archives
-    p_state->archive_manager.scan_archives(ctx.path_mod_archives, ctx.path_mod_data);
-    p_state->archive_selection.assign(p_state->archive_manager.archives.size(), 0);
-    
-    p_state->is_loaded = true;
+void ModManagerScene::save_and_exit() {
+    m_state_machine.get_engine().save_configuration();
+    m_state_machine.pop_state(); // Pop back to main menu
 }
 
+void ModManagerScene::fix_load_order_and_save() {
+    ModManager& mod_manager = m_state_machine.get_engine().get_mod_manager_mut();
 
-void ModManagerScene::handle_event(SDL_Event& e, AppContext& ctx) { /* Empty */ }
-void ModManagerScene::on_exit(AppContext& ctx) {}
+    // Fix data paths
+    auto& data_paths = mod_manager.active_data_paths;
+    auto it_data = std::find_if(data_paths.begin(), data_paths.end(), [](const fs::path& p) {
+        return fs::exists(p / "Morrowind.esm");
+    });
+    if (it_data != data_paths.end() && it_data != data_paths.begin()) {
+        fs::path game_data_path = *it_data;
+        data_paths.erase(it_data);
+        data_paths.insert(data_paths.begin(), game_data_path);
+    }
 
-// --- THE FINAL, SIMPLIFIED RENDER FUNCTION ---
-void ModManagerScene::render(AppContext& ctx) {
+    // Fix content files
+    auto& content_files = mod_manager.active_content_files;
+    const std::vector<std::string> masters = {"Morrowind.esm", "Tribunal.esm", "Bloodmoon.esm"};
+    for (int i = masters.size() - 1; i >= 0; --i) {
+        auto it_content = std::find_if(content_files.begin(), content_files.end(), [&](const ContentFile& cf){
+            return cf.name == masters[i];
+        });
+        if (it_content != content_files.end()) {
+            ContentFile master_file = *it_content;
+            content_files.erase(it_content);
+            content_files.insert(content_files.begin(), master_file);
+        }
+    }
+    
+    save_and_exit();
+}
+
+void ModManagerScene::on_enter() {
+    // on_enter is now lightweight, just rescans archives
+    m_state_machine.get_engine().rescan_archives();
+    p_state->archive_selection.assign(m_state_machine.get_engine().get_archive_manager().archives.size(), 0);
+}
+
+// handle_event is empty because all logic is in render
+void ModManagerScene::handle_event(SDL_Event& e) {}
+
+void ModManagerScene::render() {
+    // Get references to the engine and its managers
+    ModEngine& engine = m_state_machine.get_engine();
+    ModManager& mod_manager = engine.get_mod_manager_mut();
+    const ArchiveManager& archive_manager = engine.get_archive_manager();
+    const AppContext& ctx = m_state_machine.get_context();
+
+    bool state_changed = false;
+
     ImGui::SetNextWindowPos(ImVec2(0, 0));
     ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
     ImGui::Begin("Mod Manager", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove);
 
-    bool state_changed = false;
-
     if (ImGui::BeginTabBar("MainTabs", ImGuiTabBarFlags_None)) {
-        // --- TAB 0: ARCHIVE MANAGEMENT ---
         if (ImGui::BeginTabItem("Archive Management")) {
+
             bool has_new_mods = false;
             bool has_updated_mods = false;
-            for (const auto& archive : p_state->archive_manager.archives) {
+            for (const auto& archive : engine.get_archive_manager().archives) {
                 if (archive.status == ArchiveInfo::NEW) has_new_mods = true;
                 if (archive.status == ArchiveInfo::UPDATE_AVAILABLE) has_updated_mods = true;
             }
 
             if (ImGui::Button("Extract/Update Selected")) {
                 std::vector<ArchiveInfo> to_extract;
-                for(size_t i = 0; i < p_state->archive_manager.archives.size(); ++i) {
-                    if (p_state->archive_selection[i]) {
-                        to_extract.push_back(p_state->archive_manager.archives[i]);
-                    }
+                for(size_t i = 0; i < archive_manager.archives.size(); ++i) {
+                    if (p_state->archive_selection[i]) to_extract.push_back(archive_manager.archives[i]);
                 }
-                if (!to_extract.empty()) {
-                    next_scene = std::make_unique<ExtractorScene>(to_extract);
-                }
+                if (!to_extract.empty()) m_state_machine.push_extractor_scene(to_extract);
             }
+
             ImGui::SameLine();
             if (ImGui::Button("Delete Selected Mod Data")) {
-                for(size_t i = 0; i < p_state->archive_manager.archives.size(); ++i) {
+                for(size_t i = 0; i < engine.get_archive_manager().archives.size(); ++i) {
                     if (p_state->archive_selection[i]) {
-                        const auto& archive = p_state->archive_manager.archives[i];
+                        const auto& archive = engine.get_archive_manager().archives[i];
                         if (fs::exists(archive.target_data_path)) {
                             fs::remove_all(archive.target_data_path);
                         }
                     }
                 }
                 // Rescan to update status
-                p_state->archive_manager.scan_archives(ctx.path_mod_archives, ctx.path_mod_data);
-                p_state->archive_selection.assign(p_state->archive_manager.archives.size(), 0);
+                engine.get_archive_manager_mut().scan_archives(ctx.path_mod_archives, ctx.path_mod_data);
+                p_state->archive_selection.assign(engine.get_archive_manager().archives.size(), 0);
             }
             // --- NEW: Color-coded toggle buttons ---
             if (has_new_mods) {
@@ -159,8 +155,8 @@ void ModManagerScene::render(AppContext& ctx) {
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered, (ImVec4)ImColor::HSV(0.33f, 0.9f, 0.9f));
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive, (ImVec4)ImColor::HSV(0.33f, 1.0f, 1.0f));
                 if (ImGui::Button("Toggle New")) {
-                    for (size_t i = 0; i < p_state->archive_manager.archives.size(); ++i) {
-                        if (p_state->archive_manager.archives[i].status == ArchiveInfo::NEW) {
+                    for (size_t i = 0; i < engine.get_archive_manager().archives.size(); ++i) {
+                        if (engine.get_archive_manager().archives[i].status == ArchiveInfo::NEW) {
                             p_state->archive_selection[i] = !p_state->archive_selection[i];
                         }
                     }
@@ -173,8 +169,8 @@ void ModManagerScene::render(AppContext& ctx) {
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered, (ImVec4)ImColor::HSV(0.1f, 0.9f, 1.0f));
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive, (ImVec4)ImColor::HSV(0.1f, 1.0f, 1.0f));
                 if (ImGui::Button("Toggle Updates")) {
-                    for (size_t i = 0; i < p_state->archive_manager.archives.size(); ++i) {
-                        if (p_state->archive_manager.archives[i].status == ArchiveInfo::UPDATE_AVAILABLE) {
+                    for (size_t i = 0; i < engine.get_archive_manager().archives.size(); ++i) {
+                        if (engine.get_archive_manager().archives[i].status == ArchiveInfo::UPDATE_AVAILABLE) {
                             p_state->archive_selection[i] = !p_state->archive_selection[i];
                         }
                     }
@@ -186,8 +182,8 @@ void ModManagerScene::render(AppContext& ctx) {
 
              
             ImGui::BeginChild("ArchiveList", ImVec2(0, -50), true);
-            for (size_t i = 0; i < p_state->archive_manager.archives.size(); ++i) {
-                auto& archive = p_state->archive_manager.archives[i];
+            for (size_t i = 0; i < engine.get_archive_manager().archives.size(); ++i) {
+                auto& archive = engine.get_archive_manager().archives[i];
                 ImVec4 color = ImVec4(1,1,1,1);
                 std::string status_text = "[Installed]";
                 if (archive.status == ArchiveInfo::NEW) { color = ImVec4(0,1,0,1); status_text = "[New]"; }
@@ -209,7 +205,7 @@ void ModManagerScene::render(AppContext& ctx) {
         if (ImGui::BeginTabItem("Mod Configuration")) {
             ImGui::BeginChild("ModTree", ImVec2(0, -50), true);
             
-            for (auto& mod : p_state->mod_manager.mod_definitions) {
+            for (auto& mod : mod_manager.mod_definitions) {
                 // Mod name itself is unique, so this is fine.
                 if (ImGui::Checkbox(mod.name.c_str(), &mod.enabled)) {
                     state_changed = true;
@@ -245,64 +241,14 @@ void ModManagerScene::render(AppContext& ctx) {
             ImGui::EndTabItem();
         }
 
-        // --- TAB 2: DATA PATH ORDER ---
-        if (ImGui::BeginTabItem("Data Path Order")) {
-            ImGui::Text("D-Pad to navigate, L1/R1 to reorder.");
-            ImGui::SameLine();
-            if (p_state->rules_loaded) {
-                if (ImGui::Button("[Auto-Sort]")) {
-                    p_state->sort_manager.sort_data_paths(p_state->mod_manager.active_data_paths, ctx.path_mod_data);
-                }
-            }
-            ImGui::Separator();
-            ImGui::BeginChild("DataList", ImVec2(0, -50), true);
-            
-            p_state->focused_data_idx = -1; // Default to no focus
-            for (size_t i = 0; i < p_state->mod_manager.active_data_paths.size(); ++i) {
-                if (p_state->focus_request_data && p_state->focused_data_idx == (int)i) {
-                    ImGui::SetItemDefaultFocus();
-                    p_state->focus_request_data = false;
-                }
-                std::string label = p_state->mod_manager.active_data_paths[i].lexically_relative(ctx.path_mod_data).string();
-                if(ImGui::Selectable(label.c_str(), p_state->focused_data_idx == (int)i)) { /* Click selection */ }
-                if (ImGui::IsItemFocused()) { p_state->focused_data_idx = i; }
-            }
-
-            // --- Reordering logic is now INSIDE the tab's scope ---
-            if (p_state->focused_data_idx != -1) {
-                if (ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false) && p_state->focused_data_idx > 0) {
-                    std::swap(p_state->mod_manager.active_data_paths[p_state->focused_data_idx], p_state->mod_manager.active_data_paths[p_state->focused_data_idx - 1]);
-                    p_state->focused_data_idx--;
-                    p_state->focus_request_data = true;
-                }
-                if (ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false) && p_state->focused_data_idx < p_state->mod_manager.active_data_paths.size() - 1) {
-                    std::swap(p_state->mod_manager.active_data_paths[p_state->focused_data_idx], p_state->mod_manager.active_data_paths[p_state->focused_data_idx + 1]);
-                    p_state->focused_data_idx++;
-                    p_state->focus_request_data = true;
-                }
-            }
-            ImGui::EndChild();
-            ImGui::EndTabItem();
-        }
-
-        // --- TAB 3: CONTENT FILE ORDER ---
+        // --- TAB 2: CONTENT FILE ORDER ---
         if (ImGui::BeginTabItem("Content File Order")) {
             ImGui::Text("A to toggle, D-Pad to navigate, L1/R1 to reorder.");
     
-            if (p_state->mlox_rules_loaded) {
+            if (engine.mlox_rules_loaded()) {
                 ImGui::SameLine();
                 if (ImGui::Button("[Mlox Auto-Sort]")) {
-                    // Gather all necessary search paths and pass them to the sorter.
-                    std::vector<fs::path> base_paths;
-                    for (const auto& s : p_state->config_manager.base_data) {
-                        base_paths.emplace_back(s);
-                    }
-                    
-                    p_state->mlox_manager.sort_content_files(
-                        p_state->mod_manager.active_content_files,
-                        base_paths, // The base game data paths
-                        p_state->mod_manager.active_data_paths // The active mod data paths in their current order
-                    );
+                    engine.sort_content_files_by_mlox();
                 }
             }
 
@@ -310,8 +256,8 @@ void ModManagerScene::render(AppContext& ctx) {
             ImGui::BeginChild("ContentList", ImVec2(0, -50), true);
 
             p_state->focused_content_idx = -1; // Default to no focus
-            for (size_t i = 0; i < p_state->mod_manager.active_content_files.size(); ++i) {
-                auto& content = p_state->mod_manager.active_content_files[i];
+            for (size_t i = 0; i < mod_manager.active_content_files.size(); ++i) {
+                auto& content = mod_manager.active_content_files[i];
                 if (p_state->focus_request_content && p_state->focused_content_idx == (int)i) {
                     ImGui::SetItemDefaultFocus();
                     p_state->focus_request_content = false;
@@ -322,72 +268,151 @@ void ModManagerScene::render(AppContext& ctx) {
             
             if (p_state->focused_content_idx != -1) {
                 if (ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false) && p_state->focused_content_idx > 0) {
-                    std::swap(p_state->mod_manager.active_content_files[p_state->focused_content_idx], p_state->mod_manager.active_content_files[p_state->focused_content_idx - 1]);
+                    std::swap(mod_manager.active_content_files[p_state->focused_content_idx], mod_manager.active_content_files[p_state->focused_content_idx - 1]);
                     p_state->focused_content_idx--;
                     p_state->focus_request_content = true;
                 }
-                if (ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false) && p_state->focused_content_idx < p_state->mod_manager.active_content_files.size() - 1) {
-                    std::swap(p_state->mod_manager.active_content_files[p_state->focused_content_idx], p_state->mod_manager.active_content_files[p_state->focused_content_idx + 1]);
+                if (ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false) && p_state->focused_content_idx < mod_manager.active_content_files.size() - 1) {
+                    std::swap(mod_manager.active_content_files[p_state->focused_content_idx], mod_manager.active_content_files[p_state->focused_content_idx + 1]);
                     p_state->focused_content_idx++;
                     p_state->focus_request_content = true;
                 }
             }
             ImGui::EndChild();
 
-            ImGui::SameLine();
-            // --- NEW: Pane for Mlox Messages ---
-            ImGui::BeginChild("MloxMessages", ImVec2(0, -50), true);
-            ImGui::Text("Mlox Messages:");
-            ImGui::Separator();
-            if (p_state->focused_content_idx != -1) {
-                const auto& content = p_state->mod_manager.active_content_files[p_state->focused_content_idx];
-                auto messages = p_state->mlox_manager.get_messages_for_plugin(content.name);
-                if (messages.empty()) {
-                    ImGui::TextDisabled("(No messages for this plugin)");
-                } else {
-                    for (const auto& msg : messages) {
-                        ImGui::TextWrapped("%s", msg.c_str());
+            if (engine.mlox_rules_loaded()) {
+                ImGui::SameLine();
+                // --- NEW: Pane for Mlox Messages ---
+                ImGui::BeginChild("MloxMessages", ImVec2(0, -50), true);
+                ImGui::Text("Mlox Messages:");
+                ImGui::Separator();
+                if (p_state->focused_content_idx != -1) {
+                    const auto& content = mod_manager.active_content_files[p_state->focused_content_idx];
+                    auto messages = engine.get_mlox_manager().get_messages_for_plugin(content.name);
+                    if (messages.empty()) {
+                        ImGui::TextDisabled("(No messages for this plugin)");
+                    } else {
+                        for (const auto& msg : messages) {
+                            ImGui::TextWrapped("%s", msg.c_str());
+                        }
                     }
+                } else {
+                    ImGui::TextDisabled("(Focus a plugin to see messages)");
                 }
-            } else {
-                ImGui::TextDisabled("(Focus a plugin to see messages)");
+                ImGui::EndChild();
             }
-            ImGui::EndChild();
 
             ImGui::EndTabItem();
         }
+
+        // --- TAB 3: DATA PATH ORDER ---
+        if (ImGui::BeginTabItem("Data Path Order")) {
+            ImGui::Text("D-Pad to navigate, L1/R1 to reorder.");
+            if (engine.sort_rules_loaded()) {
+                ImGui::SameLine();
+                if (ImGui::Button("[Auto-Sort]")) {
+                    engine.sort_data_paths_by_rules();
+                }
+            }
+            ImGui::Separator();
+            ImGui::BeginChild("DataList", ImVec2(0, -50), true);
+            
+            p_state->focused_data_idx = -1; // Default to no focus
+            for (size_t i = 0; i < mod_manager.active_data_paths.size(); ++i) {
+                if (p_state->focus_request_data && p_state->focused_data_idx == (int)i) {
+                    ImGui::SetItemDefaultFocus();
+                    p_state->focus_request_data = false;
+                }
+                
+                // --- THIS IS THE FIX ---
+                std::string label = get_display_path(mod_manager.active_data_paths[i], mod_manager, ctx);
+
+                if (ImGui::Selectable(label.c_str(), p_state->focused_data_idx == (int)i)) { p_state->focused_data_idx = i; }
+                if (ImGui::IsItemFocused()) { p_state->focused_data_idx = i; }
+            }
+
+            // --- Reordering logic is now INSIDE the tab's scope ---
+            if (p_state->focused_data_idx != -1) {
+                if (ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false) && p_state->focused_data_idx > 0) {
+                    std::swap(mod_manager.active_data_paths[p_state->focused_data_idx], mod_manager.active_data_paths[p_state->focused_data_idx - 1]);
+                    p_state->focused_data_idx--;
+                    p_state->focus_request_data = true;
+                }
+                if (ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false) && p_state->focused_data_idx < mod_manager.active_data_paths.size() - 1) {
+                    std::swap(mod_manager.active_data_paths[p_state->focused_data_idx], mod_manager.active_data_paths[p_state->focused_data_idx + 1]);
+                    p_state->focused_data_idx++;
+                    p_state->focus_request_data = true;
+                }
+            }
+            ImGui::EndChild();
+            ImGui::EndTabItem();
+        }
+
+        // --- TAB 4: VALIDATION ---
+        if (ImGui::BeginTabItem("Validation")) {
+
+            ImGui::Text("Validation report coming soon!");
+
+            ImGui::EndTabItem();
+        }
+
         ImGui::EndTabBar();
     }
-    
-    if (state_changed) { p_state->mod_manager.update_active_lists(); }
+
+    if (state_changed) { mod_manager.update_active_lists(); }
 
     if (ImGui::Button("Save and Exit", ImVec2(150, 40))) {
-        // 1. Populate the ConfigManager's MOD lists from our UI state.
-        // The BASE lists are already in memory from load() and will be preserved.
-        p_state->config_manager.mod_data.clear();
-        for (const auto& path : p_state->mod_manager.active_data_paths) {
-            p_state->config_manager.mod_data.push_back(path.string());
-        }
-
-        p_state->config_manager.mod_content.clear();
-        p_state->config_manager.disabled_content.clear();
-        for (const auto& content_file : p_state->mod_manager.active_content_files) {
-            if (content_file.enabled) {
-                p_state->config_manager.mod_content.push_back(content_file.name);
-            } else {
-                p_state->config_manager.disabled_content.push_back(content_file.name);
-            }
-        }
+        // --- NEW VALIDATION LOGIC ---
+        const auto& data = mod_manager.active_data_paths;
+        const auto& content = mod_manager.active_content_files;
         
-        // 2. Save the file. The ConfigManager will write everything back correctly.
-        p_state->config_manager.save(ctx.path_openmw_cfg);
-        next_scene = std::make_unique<MainMenuScene>();
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Cancel", ImVec2(150, 40))) {
-        next_scene = std::make_unique<MainMenuScene>();
+        bool data_ok = !data.empty() && fs::exists(data.front() / "Morrowind.esm");
+        bool content_ok = content.size() >= 3 &&
+                          content[0].name == "Morrowind.esm" &&
+                          content[1].name == "Tribunal.esm" &&
+                          content[2].name == "Bloodmoon.esm";
+
+        if (data_ok && content_ok) {
+            save_and_exit();
+        } else {
+            p_state->show_save_warning = true;
+        }
     }
 
+    ImGui::SameLine();
+
+    if (ImGui::Button("Cancel", ImVec2(150, 40))) {
+        m_state_machine.pop_state(); // Pop back to main menu
+    }
+
+    if (p_state->show_save_warning) {
+        ImGui::OpenPopup("Save Warning");
+        p_state->show_save_warning = false; // Reset trigger
+    }
+
+    if (ImGui::BeginPopupModal("Save Warning", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text("Your load order has critical issues!\n\n"
+                    "- Morrowind.esm must be in the first data path.\n"
+                    "- Morrowind.esm, Tribunal.esm, and Bloodmoon.esm\n"
+                    "  must be the first three content files, in order.\n\n"
+                    "Saving this configuration may cause OpenMW to fail to launch.\n");
+        ImGui::Separator();
+
+        if (ImGui::Button("Fix it for me", ImVec2(150, 0))) {
+            fix_load_order_and_save();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Save Anyway", ImVec2(150, 0))) {
+            save_and_exit();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(120, 0))) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
 
     ImGui::End();
 }

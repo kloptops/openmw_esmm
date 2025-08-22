@@ -1,18 +1,18 @@
 #pragma once
 #include "Scene.h"
-#include "../mod/ModManager.h" // For ModDisplayItem
-#include "../mod/ArchiveManager.h" // Add this include
-#include "../mod/SortManager.h" // Add this include
 
 class ModManagerScene : public Scene {
 public:
-    ModManagerScene();
+    ModManagerScene(StateMachine& machine);
     ~ModManagerScene();
-    void on_enter(AppContext& ctx) override;
-    void handle_event(SDL_Event& e, AppContext& ctx) override;
-    void render(AppContext& ctx) override;
-    void on_exit(AppContext& ctx) override;
+    void on_enter() override;
+    void handle_event(SDL_Event& e) override;
+    void render() override;
+
 private:
+    void fix_load_order_and_save();
+    void save_and_exit();
+    
     struct State;
     State* p_state;
 };

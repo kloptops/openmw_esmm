@@ -7,20 +7,18 @@ namespace fs = boost::filesystem;
 
 class ConfigManager {
 public:
+    // Loads all data/content lines from the config.
     bool load(const fs::path& config_path);
+
+    // Saves the new lists back to the config file, preserving other lines.
     bool save(const fs::path& config_path);
 
-    // Lists to hold the final state for saving
-    std::vector<std::string> base_data;
-    std::vector<std::string> mod_data;
-    std::vector<std::string> base_content;
-    std::vector<std::string> mod_content;
-    std::vector<std::string> disabled_content; // For #content= lines
+    // Public lists populated by load() and used by save().
+    std::vector<std::string> data_paths;
+    std::vector<std::string> content_files;
+    std::vector<std::string> disabled_content_files;
 
 private:
-    // Buckets for all other lines to ensure we don't lose them
-    std::vector<std::string> lines_before_base_data;
-    std::vector<std::string> lines_between_data;
-    std::vector<std::string> lines_between_content;
-    std::vector<std::string> lines_after_mod_content;
+    // We only need to store the original lines of the file to reconstruct it on save.
+    std::vector<std::string> m_original_lines;
 };

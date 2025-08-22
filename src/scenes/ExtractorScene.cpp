@@ -1,53 +1,57 @@
 #include "ExtractorScene.h"
-#include "ModManagerScene.h"
+#include "../core/StateMachine.h"
 #include "../AppContext.h"
-#include "../utils/Utils.h" // For cleanModName
 #include "imgui.h"
-
 #include <iostream>
 #include <algorithm>
 #include <boost/filesystem.hpp>
 #include <cstdio>
-#include <fstream> // For std::ofstream
+#include <fstream>
 
 namespace fs = boost::filesystem;
 
-// --- NEW: Constructor to accept a list of archives to process ---
-ExtractorScene::ExtractorScene(std::vector<ArchiveInfo> archives) : archives_to_extract(std::move(archives)) {}
+ExtractorScene::ExtractorScene(StateMachine& machine, std::vector<ArchiveInfo> archives) 
+    : Scene(machine), m_archives_to_extract(std::move(archives)) {}
 
 ExtractorScene::~ExtractorScene() {
-    if (worker_thread.joinable()) {
-        worker_thread.join();
+    if (m_worker_thread.joinable()) {
+        m_worker_thread.join();
     }
 }
 
-void ExtractorScene::on_enter(AppContext& ctx) {
-    worker_thread = std::thread(&ExtractorScene::extraction_worker, this, std::ref(ctx));
+void ExtractorScene::on_enter() {
+    // We pass a const reference to the context from the state machine
+    m_worker_thread = std::thread(&ExtractorScene::extraction_worker, this, std::cref(m_state_machine.get_context()));
 }
 
-void ExtractorScene::handle_event(SDL_Event& e, AppContext& ctx) {
-    if (is_finished) {
+void ExtractorScene::on_exit() {
+    if (m_worker_thread.joinable()) {
+        m_worker_thread.join();
+    }
+}
+
+void ExtractorScene::handle_event(SDL_Event& e) {
+    if (m_is_finished) {
         if ((e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE) ||
             (e.type == SDL_CONTROLLERBUTTONDOWN && e.cbutton.button == SDL_CONTROLLER_BUTTON_B)) {
-            // NOTE: We transition back to MainMenuScene, which then goes to ModManager.
-            // This is to ensure the archive list is fully rescanned and updated.
-            next_scene = std::make_unique<ModManagerScene>();
+            // Pop this scene and return to the previous one (ModManagerScene)
+            m_state_machine.pop_state();
         }
     }
 }
 
-void ExtractorScene::render(AppContext& ctx) {
+void ExtractorScene::render() {
     ImGui::SetNextWindowPos(ImVec2(0, 0));
     ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
     ImGui::Begin("Extractor", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove);
 
-    ImGui::Text("%s", status_message.c_str());
+    ImGui::Text("%s", m_status_message.c_str());
     ImGui::Separator();
 
     ImGui::BeginChild("LogPanel", ImVec2(0, -50), true, ImGuiWindowFlags_HorizontalScrollbar);
     {
-        std::lock_guard<std::mutex> lock(log_mutex);
-        for (const auto& line : log_lines) {
+        std::lock_guard<std::mutex> lock(m_log_mutex);
+        for (const auto& line : m_log_lines) {
             ImGui::TextWrapped("%s", line.c_str());
         }
         if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) {
@@ -56,28 +60,21 @@ void ExtractorScene::render(AppContext& ctx) {
     }
     ImGui::EndChild();
 
-    if (is_finished) {
+    if (m_is_finished) {
         if (ImGui::Button("Back to Mod Manager", ImVec2(ImGui::GetContentRegionAvail().x, 40))) {
-            next_scene = std::make_unique<ModManagerScene>();
+            m_state_machine.pop_state();
         }
     }
 
     ImGui::End();
 }
 
-void ExtractorScene::on_exit(AppContext& ctx) {
-    if (worker_thread.joinable()) {
-        worker_thread.join();
-    }
-}
-
-// --- REWRITTEN worker function for targeted extraction ---
-void ExtractorScene::extraction_worker(AppContext& ctx) {
+void ExtractorScene::extraction_worker(const AppContext& ctx) {
     auto add_log = [&](const std::string& msg) {
-        std::lock_guard<std::mutex> lock(log_mutex);
+        std::lock_guard<std::mutex> lock(m_log_mutex);
         std::cout << msg << std::endl;
-        log_lines.push_back(msg);
-        status_message = "Extracting...";
+        m_log_lines.push_back(msg);
+        m_status_message = "Extracting...";
     };
 
     try {
@@ -85,19 +82,18 @@ void ExtractorScene::extraction_worker(AppContext& ctx) {
         const fs::path MOD_DATA_PATH = ctx.path_mod_data;
 
         add_log("Starting mod extraction process...");
-        
-        if (archives_to_extract.empty()) {
+        if (m_archives_to_extract.empty()) {
             add_log("No archives selected for extraction.");
-            status_message = "Finished: Nothing to extract.";
-            is_finished = true;
+            m_status_message = "Finished: Nothing to extract.";
+            m_is_finished = true;
             return;
         }
 
         fs::create_directories(MOD_DATA_PATH);
 
-        add_log("Found " + std::to_string(archives_to_extract.size()) + " archives to process.");
+        add_log("Found " + std::to_string(m_archives_to_extract.size()) + " archives to process.");
 
-        for (const auto& archive_info : archives_to_extract) {
+        for (const auto& archive_info : m_archives_to_extract) {
             fs::path output_dir = archive_info.target_data_path;
 
             add_log("------------------------------------------");
@@ -161,6 +157,6 @@ void ExtractorScene::extraction_worker(AppContext& ctx) {
         add_log("General Error: " + std::string(e.what()));
     }
     
-    status_message = "Finished. Press (B) to return.";
-    is_finished = true;
+    m_status_message = "Finished. Press (B) to return.";
+    m_is_finished = true;
 }
