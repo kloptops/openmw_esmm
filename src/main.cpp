@@ -65,9 +65,9 @@ int main(int argc, char* argv[]) {
     }
 
     AppContext ctx;
-    ctx.path_config_dir = vm.count("config-dir")  ? fs::path(vm["config-dir"].as<std::string>())  : base_path;
-    ctx.path_mod_data   = vm.count("mod-data")    ? fs::path(vm["mod-data"].as<std::string>())    : base_path / "mod_data/";
-    ctx.path_openmw_cfg = vm.count("config-file") ? fs::path(vm["config-file"].as<std::string>()) : base_path / "openmw.cfg";
+    ctx.path_config_dir      = vm.count("config-dir")   ? fs::path(vm["config-dir"].as<std::string>())  : base_path;
+    ctx.path_mod_data        = vm.count("mod-data")     ? fs::path(vm["mod-data"].as<std::string>())    : base_path / "mod_data/";
+    ctx.path_openmw_cfg      = vm.count("config-file")  ? fs::path(vm["config-file"].as<std::string>()) : base_path / "openmw.cfg";
     ctx.exec_7zz             = vm.count("7zz")          ? fs::path(vm["7zz"].as<std::string>())          : base_path / "7zzs";
     ctx.path_mod_archives    = vm.count("mod-archives") ? fs::path(vm["mod-archives"].as<std::string>()) : base_path / "mods/";
 
@@ -78,9 +78,9 @@ int main(int argc, char* argv[]) {
     if (TTF_Init() == -1)
         return 0;
 
-    ctx.window = SDL_CreateWindow("OpenMW ESMM", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_SHOWN);
+    ctx.window   = SDL_CreateWindow("OpenMW ESMM", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_SHOWN);
     ctx.renderer = SDL_CreateRenderer(ctx.window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-    ctx.font = TTF_OpenFont(FONT_PATH, 16);
+    ctx.font     = TTF_OpenFont(FONT_PATH, 16);
 
     if (!ctx.window || !ctx.renderer || !ctx.font)
         return 0;

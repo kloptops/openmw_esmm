@@ -20,6 +20,7 @@ public:
     // Initialize no longer needs the context passed in
     void initialize();
     void rescan_archives();
+    void rescan_mods();
 
     void save_configuration();
     void sort_data_paths_by_rules();

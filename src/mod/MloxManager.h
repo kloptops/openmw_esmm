@@ -3,19 +3,44 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <regex>
 #include <boost/filesystem.hpp>
 
 namespace fs = boost::filesystem;
 
-// In src/mod/MloxManager.h
+// A smart pattern that uses regex only when necessary for performance.
+struct Pattern {
+    std::string pattern_str;
+    std::regex re;
+    bool is_regex;
+
+    // Constructor analyzes the pattern and decides which matching method to use.
+    Pattern(const std::string& pattern);
+
+    // The main matching function.
+    bool match(const std::string& text) const;
+};
+
+// Rules now use the optimized Pattern struct
+struct OrderRule {
+    Pattern plugin_pattern;
+    Pattern comes_after_pattern;
+};
+
+struct MessageRule {
+    Pattern plugin_pattern;
+    std::vector<std::string> messages;
+};
+
 struct PriorityRule {
-    std::string plugin_name;
+    Pattern plugin_pattern;
     int line_number;
 };
 
+
 class MloxManager {
 public:
-    // Loads and parses the mlox_base.txt rule file
+    // Loads and parses the mlox rule files using a new lexer/parser
     bool load_rules(const std::vector<fs::path>& mlox_rules_paths);
 
     // The core function: sorts the given list of content files
@@ -25,16 +50,11 @@ public:
     std::vector<std::string> get_messages_for_plugin(const std::string& plugin_name) const;
 
     // Are any rules loaded?
-    bool rules_loaded() { return (!dependencies.empty() || !near_start_plugins.empty() && near_end_plugins.empty()); }
+    bool rules_loaded() { return (!order_rules.empty() || !near_start_plugins.empty() || !near_end_plugins.empty() || !message_rules.empty()); }
 
 private:
-    // A map where: key is a plugin, value is a list of plugins that must load BEFORE it.
-    std::map<std::string, std::vector<std::string>> dependencies;
-    
-    // A map to store notes, warnings, etc.
-    std::map<std::string, std::vector<std::string>> messages;
-
-    // Special priority hints
+    std::vector<OrderRule> order_rules;
+    std::vector<MessageRule> message_rules;
     std::vector<PriorityRule> near_start_plugins;
     std::vector<PriorityRule> near_end_plugins;
 };

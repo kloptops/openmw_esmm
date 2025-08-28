@@ -26,6 +26,109 @@ static fs::path find_common_base(const std::vector<fs::path>& paths) {
 
 ModEngine::ModEngine(AppContext& ctx) : m_app_context(ctx) {}
 
+void ModEngine::rescan_mods() {
+    LOG_INFO("Rescanning installed mods...");
+
+    // This logic is a direct copy from initialize()
+    m_mod_manager.mod_definitions.clear();
+    std::vector<fs::path> all_data_paths;
+    for (const auto& p_str : m_config_manager.data_paths) {
+        if (!p_str.empty()) all_data_paths.emplace_back(p_str);
+    }
+
+    fs::path game_data_path;
+    all_data_paths.erase(std::remove_if(all_data_paths.begin(), all_data_paths.end(),
+        [&](const fs::path& p) {
+            if (fs::exists(p / "Morrowind.esm")) {
+                game_data_path = p;
+                return true;
+            }
+            return false;
+        }), all_data_paths.end());
+
+    m_mod_source_dirs.clear();
+    if (fs::exists(m_app_context.path_mod_data)) {
+        m_mod_source_dirs.push_back(m_app_context.path_mod_data);
+    }
+    std::vector<fs::path> external_paths;
+    for(const auto& p : all_data_paths) {
+        if (p.string().find(m_app_context.path_mod_data.string()) != 0) {
+            external_paths.push_back(p);
+        }
+    }
+    if (!external_paths.empty()) {
+        m_mod_source_dirs.push_back(find_common_base(external_paths));
+    }
+    
+    // Scan mod_data for any newly extracted directories not yet in the config
+    if (fs::exists(m_app_context.path_mod_data)) {
+        for (const auto& entry : fs::directory_iterator(m_app_context.path_mod_data)) {
+            if (fs::is_directory(entry)) {
+                 all_data_paths.push_back(entry.path());
+            }
+        }
+    }
+
+
+    std::map<fs::path, std::vector<fs::path>> grouped_paths;
+    for (const auto& path : all_data_paths) {
+        fs::path mod_root;
+        for (const auto& source_dir : m_mod_source_dirs) {
+            if (!source_dir.empty() && path.string().find(source_dir.string()) == 0) {
+                fs::path relative = path.lexically_relative(source_dir);
+                if (!relative.empty() && relative.string() != ".") {
+                    mod_root = source_dir / *relative.begin();
+                    break;
+                }
+            }
+        }
+        if (!mod_root.empty()) {
+            grouped_paths[mod_root].push_back(path);
+        }
+    }
+    
+    for (const auto& pair : grouped_paths) {
+        if (fs::exists(pair.first)) {
+            m_mod_manager.mod_definitions.push_back(parse_mod_directory(pair.first));
+        }
+    }
+
+    if (!game_data_path.empty()) {
+        ModDefinition mw_mod;
+        mw_mod.name = "The Elder Scrolls III: Morrowind";
+        mw_mod.root_path = game_data_path;
+        mw_mod.enabled = true;
+        ModOptionGroup main_group;
+        main_group.name = "Main";
+        main_group.type = ModOptionGroup::MULTIPLE_CHOICE;
+        main_group.required = true;
+        ModOption main_option;
+        main_option.name = "Data Files";
+        main_option.path = game_data_path;
+        main_option.enabled = true;
+        main_option.parent_group = &main_group;
+        main_option.discovered_plugins = find_plugins_in_path(game_data_path);
+        main_group.options.push_back(main_option);
+        mw_mod.option_groups.push_back(main_group);
+        m_mod_manager.mod_definitions.insert(m_mod_manager.mod_definitions.begin(), mw_mod);
+    }
+    
+    std::sort(m_mod_manager.mod_definitions.begin(), m_mod_manager.mod_definitions.end(),
+        [](const ModDefinition& a, const ModDefinition& b) {
+            if (a.name == "The Elder Scrolls III: Morrowind") return true;
+            if (b.name == "The Elder Scrolls III: Morrowind") return false;
+            return a.name < b.name;
+        });
+
+    std::vector<std::string> all_content_for_sync = m_config_manager.content_files;
+    all_content_for_sync.insert(all_content_for_sync.end(), m_config_manager.disabled_content_files.begin(), m_config_manager.disabled_content_files.end());
+    m_mod_manager.sync_state_from_config(m_config_manager.data_paths, all_content_for_sync);
+    
+    // We don't need to reload content files from config here, just update them
+    m_mod_manager.update_active_lists();
+    LOG_INFO("Mod rescan complete.");
+}
+
 void ModEngine::initialize() {
     if (m_is_initialized) return;
 
@@ -39,130 +142,31 @@ void ModEngine::initialize() {
     m_mlox_manager.load_rules({base_mlox_path, user_mlox_path});
     m_config_manager.load(m_app_context.path_openmw_cfg);
 
-    // --- NEW, ROBUST MOD DISCOVERY LOGIC ---
-    m_mod_manager.mod_definitions.clear();
-    std::vector<fs::path> all_data_paths;
-    for (const auto& p_str : m_config_manager.data_paths) {
-        if (!p_str.empty()) all_data_paths.emplace_back(p_str);
-    }
+    // --- Perform initial scan and setup ---
+    rescan_mods(); // Use the new function to do the heavy lifting
 
-    // 1. Find and separate the base game data path
-    fs::path game_data_path;
-    all_data_paths.erase(std::remove_if(all_data_paths.begin(), all_data_paths.end(),
-        [&](const fs::path& p) {
-            if (fs::exists(p / "Morrowind.esm")) {
-                game_data_path = p;
-                return true;
-            }
-            return false;
-        }), all_data_paths.end());
-
-    // 2. Group remaining paths by their logical mod root
-    m_mod_source_dirs.clear();
-    if (fs::exists(m_app_context.path_mod_data)) {
-        m_mod_source_dirs.push_back(m_app_context.path_mod_data);
-    }
-    
-    std::vector<fs::path> external_paths;
-    for(const auto& p : all_data_paths) {
-        if (p.string().find(m_app_context.path_mod_data.string()) != 0) {
-            external_paths.push_back(p);
-        }
-    }
-    if (!external_paths.empty()) {
-        m_mod_source_dirs.push_back(find_common_base(external_paths));
-    }
-
-    std::map<fs::path, std::vector<fs::path>> grouped_paths;
-    for (const auto& path : all_data_paths) {
-        fs::path mod_root;
-        for (const auto& source_dir : m_mod_source_dirs) {
-            if (!source_dir.empty() && path.string().find(source_dir.string()) == 0) {
-                fs::path relative = path.lexically_relative(source_dir);
-                if (!relative.empty()) {
-                    mod_root = source_dir / *relative.begin(); // The first directory component is the mod name
-                    break;
-                }
-            }
-        }
-        if (!mod_root.empty()) {
-            grouped_paths[mod_root].push_back(path);
-        }
-    }
-
-    // 3. Parse each identified mod root
-    for (const auto& pair : grouped_paths) {
-        if (fs::exists(pair.first)) {
-            m_mod_manager.mod_definitions.push_back(parse_mod_directory(pair.first));
-        }
-    }
-
-    // 4. Manually create the ModDefinition for the base game
-    if (!game_data_path.empty()) {
-        ModDefinition mw_mod;
-        mw_mod.name = "The Elder Scrolls III: Morrowind";
-        mw_mod.root_path = game_data_path;
-        mw_mod.enabled = true;
-
-        ModOptionGroup main_group;
-        main_group.name = "Main";
-        main_group.type = ModOptionGroup::MULTIPLE_CHOICE;
-        main_group.required = true;
-        
-        ModOption main_option;
-        main_option.name = "Data Files";
-        main_option.path = game_data_path;
-        main_option.enabled = true;
-        main_option.parent_group = &main_group;
-
-        main_option.discovered_plugins = find_plugins_in_path(game_data_path);
-
-        main_group.options.push_back(main_option);
-
-        mw_mod.option_groups.push_back(main_group);
-        m_mod_manager.mod_definitions.insert(m_mod_manager.mod_definitions.begin(), mw_mod);
-    }
-
-    std::sort(m_mod_manager.mod_definitions.begin(), m_mod_manager.mod_definitions.end(),
-        [](const ModDefinition& a, const ModDefinition& b) {
-            if (a.name == "The Elder Scrolls III: Morrowind") return true;
-            if (b.name == "The Elder Scrolls III: Morrowind") return false;
-            return a.name < b.name;
-        });
-
-    // --- Sync state and finish initialization as before ---
-    std::vector<std::string> all_content_for_sync = m_config_manager.content_files;
-    all_content_for_sync.insert(all_content_for_sync.end(), m_config_manager.disabled_content_files.begin(), m_config_manager.disabled_content_files.end());
-    m_mod_manager.sync_state_from_config(m_config_manager.data_paths, all_content_for_sync);
-    
+    // --- Load initial content file lists FROM THE CONFIG ---
+    // This part is only needed once at startup.
     m_mod_manager.active_data_paths.clear();
     for (const auto& p_str : m_config_manager.data_paths) m_mod_manager.active_data_paths.push_back(fs::path(p_str));
     
     m_mod_manager.active_content_files.clear();
+    // This map needs to be built AFTER rescan_mods()
     std::map<std::string, std::string> all_plugins_map;
-    // Add base game plugins
-    if (!game_data_path.empty() && fs::is_directory(game_data_path)) {
-        for(const auto& entry : fs::directory_iterator(game_data_path)) {
-            if (is_plugin_file(entry.path())) {
-                all_plugins_map[entry.path().filename().string()] = "The Elder Scrolls III: Morrowind";
-            }
-        }
-    }
-    // Add mod plugins
     for(const auto& mod : m_mod_manager.mod_definitions) {
         for(const auto& group : mod.option_groups) for(const auto& option : group.options) for(const auto& plugin : option.discovered_plugins) all_plugins_map[plugin] = mod.name;
     }
-    
     std::set<std::string> enabled_set(m_config_manager.content_files.begin(), m_config_manager.content_files.end());
+    std::vector<std::string> all_content_for_sync = m_config_manager.content_files;
+    all_content_for_sync.insert(all_content_for_sync.end(), m_config_manager.disabled_content_files.begin(), m_config_manager.disabled_content_files.end());
     for (const auto& c_str : all_content_for_sync) {
         std::string source_mod = all_plugins_map.count(c_str) ? all_plugins_map[c_str] : "Unknown";
         m_mod_manager.active_content_files.push_back({c_str, enabled_set.count(c_str) > 0, source_mod});
     }
-    m_mod_manager.update_active_lists();
-    
+
     m_archive_manager.scan_archives(m_app_context.path_mod_archives, m_app_context.path_mod_data);
 
-    LOG_INFO("Performing initial sort of core game files...");
+    // --- Initial sort for core game files ---
 
     // 1. Force the main data path to the top of the data list.
     auto& data_paths = m_mod_manager.active_data_paths;

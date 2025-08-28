@@ -5,6 +5,7 @@
 
 MainMenuScene::MainMenuScene(StateMachine& machine) : Scene(machine) {
     m_options = {"Load Morrowind", "Mod Manager", "Settings", "Quit"};
+    set_default = true;
 }
 
 void MainMenuScene::handle_event(SDL_Event& e) {
@@ -62,6 +63,12 @@ void MainMenuScene::render() {
         // Center each menu item
         textWidth = ImGui::CalcTextSize(m_options[i].c_str()).x;
         ImGui::SetCursorPosX((windowWidth - textWidth) * 0.5f);
+
+        if (i == 0 && set_default)
+        {
+            ImGui::SetItemDefaultFocus();
+            set_default = false;
+        }
 
         // The selectable item
         if (ImGui::Selectable(m_options[i].c_str()))

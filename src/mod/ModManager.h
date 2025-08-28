@@ -51,6 +51,7 @@ struct ContentFile {
     std::string name;
     bool enabled = true;
     std::string source_mod; // Helpful for display
+    bool is_new = false;    // To flag newly discovered plugins in the UI
 };
 
 // The main class that holds all state and logic

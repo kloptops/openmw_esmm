@@ -11,4 +11,5 @@ public:
 private:
     void on_select(int i);
     std::vector<std::string> m_options;
+    bool set_default;
 };

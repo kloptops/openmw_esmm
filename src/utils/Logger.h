@@ -43,13 +43,24 @@ public:
 private:
     Logger() = default;
     LogLevel m_level = LogLevel::INFO; // Default log level
+    
+    // --- C++14 COMPATIBLE RECURSIVE LOGGING ---
+    template<typename T, typename... Args>
+    void build_log_stream(std::ostringstream& oss, const T& first, const Args&... rest) {
+        oss << first;
+        build_log_stream(oss, rest...);
+    }
+
+    // Base case for the recursion
+    void build_log_stream(std::ostringstream& oss) {
+        // Does nothing, ends the recursion.
+    }
 
     template<typename... Args>
     void log(const std::string& prefix, const Args&... args) {
         std::ostringstream oss;
         oss << prefix << " ";
-        // Use a fold expression (C++17) or a simple recursive template for older C++
-        (oss << ... << args);
+        build_log_stream(oss, args...);
         std::cout << oss.str() << std::endl;
     }
 

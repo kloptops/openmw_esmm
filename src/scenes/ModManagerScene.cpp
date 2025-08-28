@@ -50,7 +50,8 @@ struct ModManagerScene::State {
     bool focus_request_data = false;
     bool focus_request_content = false;
     std::vector<char> archive_selection;
-    bool show_save_warning = false; // NEW
+    bool show_save_warning = false;
+    bool needs_refresh = true;
 };
 
 ModManagerScene::ModManagerScene(StateMachine& machine) : Scene(machine) {
@@ -98,9 +99,7 @@ void ModManagerScene::fix_load_order_and_save() {
 }
 
 void ModManagerScene::on_enter() {
-    // on_enter is now lightweight, just rescans archives
-    m_state_machine.get_engine().rescan_archives();
-    p_state->archive_selection.assign(m_state_machine.get_engine().get_archive_manager().archives.size(), 0);
+    p_state->needs_refresh = true;
 }
 
 // handle_event is empty because all logic is in render
@@ -112,6 +111,13 @@ void ModManagerScene::render() {
     ModManager& mod_manager = engine.get_mod_manager_mut();
     const ArchiveManager& archive_manager = engine.get_archive_manager();
     const AppContext& ctx = m_state_machine.get_context();
+
+    if (p_state->needs_refresh) {
+        engine.rescan_archives();
+        engine.rescan_mods();
+        p_state->archive_selection.assign(engine.get_archive_manager().archives.size(), 0);
+        p_state->needs_refresh = false;
+    }
 
     bool state_changed = false;
 
@@ -134,22 +140,30 @@ void ModManagerScene::render() {
                 for(size_t i = 0; i < archive_manager.archives.size(); ++i) {
                     if (p_state->archive_selection[i]) to_extract.push_back(archive_manager.archives[i]);
                 }
-                if (!to_extract.empty()) m_state_machine.push_extractor_scene(to_extract);
+                if (!to_extract.empty())
+                {
+                    p_state->needs_refresh = true;
+                    m_state_machine.push_extractor_scene(to_extract);
+                }
             }
 
             ImGui::SameLine();
             if (ImGui::Button("Delete Selected Mod Data")) {
+                std::vector<fs::path> paths_to_delete;
                 for(size_t i = 0; i < engine.get_archive_manager().archives.size(); ++i) {
                     if (p_state->archive_selection[i]) {
                         const auto& archive = engine.get_archive_manager().archives[i];
                         if (fs::exists(archive.target_data_path)) {
-                            fs::remove_all(archive.target_data_path);
+                            paths_to_delete.push_back(archive.target_data_path);
                         }
                     }
                 }
-                // Rescan to update status
-                engine.get_archive_manager_mut().scan_archives(ctx.path_mod_archives, ctx.path_mod_data);
-                p_state->archive_selection.assign(engine.get_archive_manager().archives.size(), 0);
+
+                if (!paths_to_delete.empty()) {
+                    engine.delete_mod_data(paths_to_delete);
+                    // --- Immediately trigger a refresh ---
+                    p_state->needs_refresh = true; 
+                }
             }
             // --- NEW: Color-coded toggle buttons ---
             if (has_new_mods) {
@@ -283,12 +297,28 @@ void ModManagerScene::render() {
             p_state->focused_content_idx = -1; // Default to no focus
             for (size_t i = 0; i < mod_manager.active_content_files.size(); ++i) {
                 auto& content = mod_manager.active_content_files[i];
+                bool content_is_new = false;
+
+                if (content.is_new) {
+                    // Push a yellow color for the text of new plugins
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 0.4f, 1.0f));
+                    content_is_new = true;
+                }
+
                 if (p_state->focus_request_content && p_state->focused_content_idx == (int)i) {
                     ImGui::SetItemDefaultFocus();
                     p_state->focus_request_content = false;
                 }
-                if (ImGui::Checkbox(content.name.c_str(), &content.enabled)) { state_changed = true; }
+                if (ImGui::Checkbox(content.name.c_str(), &content.enabled)) {
+                    // If the user interacts with it, it's no longer "new"
+                    content.is_new = false;
+                    state_changed = true;
+                }
                 if (ImGui::IsItemFocused()) { p_state->focused_content_idx = i; }
+
+                if (content_is_new) {
+                    ImGui::PopStyleColor(); // Don't forget to pop the color!
+                }
             }
             
             if (p_state->focused_content_idx != -1) {
@@ -304,29 +334,6 @@ void ModManagerScene::render() {
                 }
             }
             ImGui::EndChild();
-
-            if (engine.mlox_rules_loaded()) {
-                ImGui::SameLine();
-                // --- NEW: Pane for Mlox Messages ---
-                ImGui::BeginChild("MloxMessages", ImVec2(0, -50), true);
-                ImGui::Text("Mlox Messages:");
-                ImGui::Separator();
-                if (p_state->focused_content_idx != -1) {
-                    const auto& content = mod_manager.active_content_files[p_state->focused_content_idx];
-                    auto messages = engine.get_mlox_manager().get_messages_for_plugin(content.name);
-                    if (messages.empty()) {
-                        ImGui::TextDisabled("(No messages for this plugin)");
-                    } else {
-                        for (const auto& msg : messages) {
-                            ImGui::TextWrapped("%s", msg.c_str());
-                        }
-                    }
-                } else {
-                    ImGui::TextDisabled("(Focus a plugin to see messages)");
-                }
-                ImGui::EndChild();
-            }
-
             ImGui::EndTabItem();
         }
 

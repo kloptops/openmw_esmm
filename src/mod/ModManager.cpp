@@ -225,9 +225,7 @@ void ModManager::update_active_lists() {
     // 4. Replace the old list.
     active_data_paths = new_active_data_paths;
 
-    // --- PART 2: CONTENT FILES (REWRITTEN) ---
-
-    // 1. Get a map of all plugins that are discoverable from enabled data paths
+    // --- PART 2: CONTENT FILES (UPDATED LOGIC) ---
     std::map<std::string, std::string> available_plugins; // map<plugin_name, source_mod>
     for (const auto& mod : mod_definitions) {
         if (!mod.enabled) continue;
@@ -242,28 +240,31 @@ void ModManager::update_active_lists() {
         }
     }
 
-    // 2. Build the new list.
     std::vector<ContentFile> new_active_content_files;
     std::set<std::string> plugins_in_new_list;
 
-    // First pass: Iterate through the CURRENT list. Keep any plugin that is still available.
-    // This preserves both user order AND the user's enabled/disabled state.
+    // First pass: Preserve existing plugins, their order, and their state.
     for (const auto& existing_content_file : active_content_files) {
         if (available_plugins.count(existing_content_file.name)) {
+            // It still exists, so we keep it. is_new will be false by default.
             new_active_content_files.push_back(existing_content_file);
             plugins_in_new_list.insert(existing_content_file.name);
         }
     }
 
-    // Second pass: Add any brand new plugins that have become available and weren't in the old list.
-    // These are always added to the end and default to 'enabled'.
+    // Second pass: Add any brand new plugins that have just become available.
     for (const auto& pair : available_plugins) {
         if (plugins_in_new_list.find(pair.first) == plugins_in_new_list.end()) {
-            new_active_content_files.push_back({pair.first, true, pair.second});
+            // This is a newly discovered plugin.
+            ContentFile new_file;
+            new_file.name = pair.first;
+            new_file.enabled = false;   // Set to DISABLED by default.
+            new_file.source_mod = pair.second;
+            new_file.is_new = true;     // Flag it as NEW for the UI.
+            new_active_content_files.push_back(new_file);
         }
     }
     
-    // 3. Replace the old list
     active_content_files = new_active_content_files;
 }
 
