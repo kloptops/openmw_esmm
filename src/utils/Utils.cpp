@@ -8,6 +8,15 @@
 
 namespace fs = boost::filesystem;
 
+
+std::string trim(const std::string& s) {
+    size_t first = s.find_first_not_of(" \t\r\n");
+    if (std::string::npos == first) return "";
+    size_t last = s.find_last_not_of(" \t\r\n");
+    return s.substr(first, (last - first + 1));
+}
+
+
 std::string getEnvVar(const std::string& name, const std::string& default_val)
 {
     const char* value = std::getenv(name.c_str());

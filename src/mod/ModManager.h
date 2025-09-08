@@ -58,8 +58,7 @@ struct ContentFile {
 class ModManager {
 public:
     void scan_mods(const fs::path& mod_data_path);
-    void sync_state_from_config(const std::vector<std::string>& active_data, const std::vector<std::string>& active_content);
-    // This is now the most important function for updating the final lists
+    void sync_ui_state_from_active_lists();
     void update_active_lists();
 
     std::vector<ModDefinition> mod_definitions;

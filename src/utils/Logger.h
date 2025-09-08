@@ -40,6 +40,11 @@ public:
         if (m_level <= LogLevel::ERROR) log("[ERROR]", args...);
     }
 
+    template<typename... Args>
+    void raw(const Args&... args) {
+        log("", args...);
+    }
+
 private:
     Logger() = default;
     LogLevel m_level = LogLevel::INFO; // Default log level
@@ -75,6 +80,7 @@ public:
 #define LOG_INFO(...)  Logger::get().info(__VA_ARGS__)
 #define LOG_WARN(...)  Logger::get().warn(__VA_ARGS__)
 #define LOG_ERROR(...) Logger::get().error(__VA_ARGS__)
+#define LOG_RAW(...)   Logger::get().raw(__VA_ARGS__)
 
 #define WANT_DEBUG (Logger::get().want_log(LogLevel::DEBUG))
 #define WANT_INFO  (Logger::get().want_log(LogLevel::INFO))

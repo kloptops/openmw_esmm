@@ -4,6 +4,7 @@
 #include "utils/Utils.h"
 #include "core/StateMachine.h"
 #include "core/ModEngine.h"
+#include "scenes/MainMenuScene.h"
 
 // ImGui Includes
 #include "imgui.h"
@@ -109,7 +110,7 @@ int main(int argc, char* argv[]) {
 
     // --- Scene & Main Loop ---
     StateMachine machine(ctx);
-    machine.push_state(StateID::MainMenu); // Push the first scene
+    machine.push_scene(std::make_unique<MainMenuScene>(machine));
 
     while (ctx.running) {
         SDL_Event e;

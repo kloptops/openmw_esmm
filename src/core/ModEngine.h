@@ -2,11 +2,13 @@
 #include "../mod/ModManager.h"
 #include "../mod/ArchiveManager.h"
 #include "../mod/ConfigManager.h"
-#include "../mod/MloxManager.h"
-#include "../mod/SortManager.h"
+#include "../mod/ScriptManager.h"
 #include "../AppContext.h"
 #include <vector>
 #include <string>
+
+// Forward declare this to avoid a circular reference.
+class StateMachine;
 
 // Forward declarations
 ModDefinition parse_mod_directory(const fs::path& mod_root_path);
@@ -22,33 +24,39 @@ public:
     void rescan_archives();
     void rescan_mods();
 
+    void run_active_sorter(ScriptRegistration type);
+    void run_active_verifier();
+
+    bool has_active_sorter(ScriptRegistration type) const;
+    bool has_active_verifier() const;
+
     void save_configuration();
-    void sort_data_paths_by_rules();
-    void sort_content_files_by_mlox();
+    bool write_temporary_cfg(const fs::path& temp_cfg_path);
+
     void delete_mod_data(const std::vector<fs::path>& paths_to_delete);
 
     const ModManager& get_mod_manager() const { return m_mod_manager; }
     const ArchiveManager& get_archive_manager() const { return m_archive_manager; }
-    const MloxManager& get_mlox_manager() const { return m_mlox_manager; }
 
     ArchiveManager& get_archive_manager_mut() { return m_archive_manager; }
     ModManager& get_mod_manager_mut() { return m_mod_manager; }
-    SortManager& get_sort_manager_mut() { return m_sort_manager; }
-    MloxManager& get_mlox_manager_mut() { return m_mlox_manager; }
+    ScriptManager* get_script_manager_mut() { return &m_script_manager; } // NEW
     ConfigManager& get_config_manager_mut() { return m_config_manager; }
 
-    // Are any rules loaded?
-    bool mlox_rules_loaded() { return m_mlox_manager.rules_loaded(); }
-    bool sort_rules_loaded() { return m_sort_manager.rules_loaded(); }
+    StateMachine& get_state_machine();
+    void set_state_machine(StateMachine& machine);
 
 private:
-    // Now a reference, not a copy!
+    void discover_mod_definitions();
+
+    StateMachine* m_state_machine = nullptr;
+
     AppContext& m_app_context;
     ModManager m_mod_manager;
     ArchiveManager m_archive_manager;
     ConfigManager m_config_manager;
-    MloxManager m_mlox_manager;
-    SortManager m_sort_manager;
+    ScriptManager m_script_manager;
+
     bool m_is_initialized = false;
-    std::vector<fs::path> m_mod_source_dirs; // NEW MEMBER
+    std::vector<fs::path> m_mod_source_dirs;
 };

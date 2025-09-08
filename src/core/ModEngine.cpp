@@ -1,5 +1,10 @@
 #include "ModEngine.h"
+#include "StateMachine.h"
+#include "../mod/ConfigParser.h"
+#include "../scenes/ScriptRunner.h"
+#include "../scenes/ScriptRunnerScene.h"
 #include "../utils/Logger.h"
+#include "../utils/Utils.h"
 #include <set>
 #include <vector>
 #include <algorithm>
@@ -26,16 +31,16 @@ static fs::path find_common_base(const std::vector<fs::path>& paths) {
 
 ModEngine::ModEngine(AppContext& ctx) : m_app_context(ctx) {}
 
-void ModEngine::rescan_mods() {
-    LOG_INFO("Rescanning installed mods...");
+StateMachine& ModEngine::get_state_machine() { return *m_state_machine; }
+void ModEngine::set_state_machine(StateMachine& machine) { m_state_machine = &machine; }
 
-    // This logic is a direct copy from initialize()
+void ModEngine::discover_mod_definitions() {
+    // This method contains the core logic for finding and parsing mod directories.
+    const auto& loaded_cfg = m_config_manager.get_loaded_data();
+
     m_mod_manager.mod_definitions.clear();
-    std::vector<fs::path> all_data_paths;
-    for (const auto& p_str : m_config_manager.data_paths) {
-        if (!p_str.empty()) all_data_paths.emplace_back(p_str);
-    }
-
+    std::vector<fs::path> all_data_paths = loaded_cfg.data_paths;
+    
     fs::path game_data_path;
     all_data_paths.erase(std::remove_if(all_data_paths.begin(), all_data_paths.end(),
         [&](const fs::path& p) {
@@ -60,15 +65,11 @@ void ModEngine::rescan_mods() {
         m_mod_source_dirs.push_back(find_common_base(external_paths));
     }
     
-    // Scan mod_data for any newly extracted directories not yet in the config
     if (fs::exists(m_app_context.path_mod_data)) {
         for (const auto& entry : fs::directory_iterator(m_app_context.path_mod_data)) {
-            if (fs::is_directory(entry)) {
-                 all_data_paths.push_back(entry.path());
-            }
+            if (fs::is_directory(entry)) all_data_paths.push_back(entry.path());
         }
     }
-
 
     std::map<fs::path, std::vector<fs::path>> grouped_paths;
     for (const auto& path : all_data_paths) {
@@ -82,9 +83,7 @@ void ModEngine::rescan_mods() {
                 }
             }
         }
-        if (!mod_root.empty()) {
-            grouped_paths[mod_root].push_back(path);
-        }
+        if (!mod_root.empty()) grouped_paths[mod_root].push_back(path);
     }
     
     for (const auto& pair : grouped_paths) {
@@ -119,69 +118,65 @@ void ModEngine::rescan_mods() {
             if (b.name == "The Elder Scrolls III: Morrowind") return false;
             return a.name < b.name;
         });
+}
 
-    std::vector<std::string> all_content_for_sync = m_config_manager.content_files;
-    all_content_for_sync.insert(all_content_for_sync.end(), m_config_manager.disabled_content_files.begin(), m_config_manager.disabled_content_files.end());
-    m_mod_manager.sync_state_from_config(m_config_manager.data_paths, all_content_for_sync);
-    
-    // We don't need to reload content files from config here, just update them
-    m_mod_manager.update_active_lists();
+
+void ModEngine::rescan_mods() {
+    LOG_INFO("Rescanning installed mods...");
+    discover_mod_definitions();
+    m_mod_manager.sync_ui_state_from_active_lists(); // Use the renamed function
     LOG_INFO("Mod rescan complete.");
 }
 
 void ModEngine::initialize() {
     if (m_is_initialized) return;
-
     LOG_INFO("ModEngine: Initializing...");
 
-    // --- Load Rules and Base Config ---
-    fs::path ini_path = m_app_context.path_config_dir / "openmw_esmm.ini";
-    fs::path base_mlox_path = m_app_context.path_config_dir / "mlox_base.txt";
-    fs::path user_mlox_path = m_app_context.path_config_dir / "mlox_user.txt";
-    m_sort_manager.load_rules(ini_path);
-    m_mlox_manager.load_rules({base_mlox_path, user_mlox_path});
+    // 1. Load support systems
+    m_script_manager.scan_scripts(m_app_context.path_config_dir / "scripts");
+    m_script_manager.load_options(m_app_context.path_config_dir / "openmw_esmm_options.cfg");
     m_config_manager.load(m_app_context.path_openmw_cfg);
-
-    // --- Perform initial scan and setup ---
-    rescan_mods(); // Use the new function to do the heavy lifting
-
-    // --- Load initial content file lists FROM THE CONFIG ---
-    // This part is only needed once at startup.
-    m_mod_manager.active_data_paths.clear();
-    for (const auto& p_str : m_config_manager.data_paths) m_mod_manager.active_data_paths.push_back(fs::path(p_str));
     
-    m_mod_manager.active_content_files.clear();
-    // This map needs to be built AFTER rescan_mods()
+    // 2. Discover all available mods from the filesystem. This populates m_mod_manager.mod_definitions
+    discover_mod_definitions();
+
+    // 3. Set the active lists in ModManager directly from the loaded config. This is the source of truth.
+    const auto& loaded_cfg = m_config_manager.get_loaded_data();
+    m_mod_manager.active_data_paths = loaded_cfg.data_paths;
+    m_mod_manager.active_content_files = loaded_cfg.content_files;
+
+    // 4. Enrich the active_content_files with source_mod info found during discovery
     std::map<std::string, std::string> all_plugins_map;
     for(const auto& mod : m_mod_manager.mod_definitions) {
-        for(const auto& group : mod.option_groups) for(const auto& option : group.options) for(const auto& plugin : option.discovered_plugins) all_plugins_map[plugin] = mod.name;
+        for(const auto& group : mod.option_groups) for(const auto& option : group.options) for(const auto& plugin : option.discovered_plugins) {
+            all_plugins_map[plugin] = mod.name;
+        }
     }
-    std::set<std::string> enabled_set(m_config_manager.content_files.begin(), m_config_manager.content_files.end());
-    std::vector<std::string> all_content_for_sync = m_config_manager.content_files;
-    all_content_for_sync.insert(all_content_for_sync.end(), m_config_manager.disabled_content_files.begin(), m_config_manager.disabled_content_files.end());
-    for (const auto& c_str : all_content_for_sync) {
-        std::string source_mod = all_plugins_map.count(c_str) ? all_plugins_map[c_str] : "Unknown";
-        m_mod_manager.active_content_files.push_back({c_str, enabled_set.count(c_str) > 0, source_mod});
+    for (auto& cf : m_mod_manager.active_content_files) {
+        if (all_plugins_map.count(cf.name)) {
+            cf.source_mod = all_plugins_map[cf.name];
+        }
     }
 
+    // 5. NOW, sync the UI state (checkboxes) based on the true active lists we just established
+    m_mod_manager.sync_ui_state_from_active_lists();
+
+    // 6. Scan archives and perform initial sort
     m_archive_manager.scan_archives(m_app_context.path_mod_archives, m_app_context.path_mod_data);
+    LOG_INFO("Performing initial sort of core game files...");
 
-    // --- Initial sort for core game files ---
-
-    // 1. Force the main data path to the top of the data list.
     auto& data_paths = m_mod_manager.active_data_paths;
     auto it_data = std::find_if(data_paths.begin(), data_paths.end(), [](const fs::path& p) {
         return fs::exists(p / "Morrowind.esm");
     });
     if (it_data != data_paths.end() && it_data != data_paths.begin()) {
-        fs::path game_data_path = *it_data;
+        fs::path gdp = *it_data;
         data_paths.erase(it_data);
-        data_paths.insert(data_paths.begin(), game_data_path);
+        data_paths.insert(data_paths.begin(), gdp);
     }
 
-    // 2. Force the core ESMs to the top of the content list in the correct order.
     auto& content_files = m_mod_manager.active_content_files;
-    const std::vector<std::string> masters = {"Bloodmoon.esm", "Tribunal.esm", "Morrowind.esm"}; // Process in reverse for insertion at the front
+    const std::vector<std::string> masters = {"Bloodmoon.esm", "Tribunal.esm", "Morrowind.esm"};
     for (const auto& master_name : masters) {
         auto it_content = std::find_if(content_files.begin(), content_files.end(), [&](const ContentFile& cf){
             return cf.name == master_name;
@@ -194,7 +189,6 @@ void ModEngine::initialize() {
     }
 
     m_is_initialized = true;
-
     LOG_INFO("ModEngine: Initialization complete.");
 }
 
@@ -202,30 +196,49 @@ void ModEngine::rescan_archives() {
     m_archive_manager.scan_archives(m_app_context.path_mod_archives, m_app_context.path_mod_data);
 }
 
-void ModEngine::save_configuration() {
-    LOG_INFO("Saving configuration to ", m_app_context.path_openmw_cfg.string());
-    
-    m_config_manager.data_paths.clear();
-    for (const auto& path : m_mod_manager.active_data_paths) m_config_manager.data_paths.push_back(path.string());
-    
-    m_config_manager.content_files.clear();
-    m_config_manager.disabled_content_files.clear();
-    for (const auto& cf : m_mod_manager.active_content_files) {
-        if (cf.enabled) m_config_manager.content_files.push_back(cf.name);
-        else m_config_manager.disabled_content_files.push_back(cf.name);
+
+bool ModEngine::write_temporary_cfg(const fs::path& temp_cfg_path) {
+    std::ifstream original_file(m_app_context.path_openmw_cfg.string());
+    if (!original_file.is_open()) {
+        LOG_ERROR("Could not open original openmw.cfg to create temporary copy.");
+        return false;
     }
-    
-    m_config_manager.save(m_app_context.path_openmw_cfg);
-}
 
-void ModEngine::sort_data_paths_by_rules() {
-    m_sort_manager.sort_data_paths(m_mod_manager.active_data_paths, m_mod_source_dirs);
-}
+    std::ofstream temp_file(temp_cfg_path.string());
+    if (!temp_file.is_open()) {
+        LOG_ERROR("Could not create temporary openmw.cfg at ", temp_cfg_path.string());
+        return false;
+    }
 
-void ModEngine::sort_content_files_by_mlox() {
-    std::vector<fs::path> base_paths; // mlox now gets all paths
-    for (const auto& p : m_mod_manager.active_data_paths) base_paths.emplace_back(p);
-    m_mlox_manager.sort_content_files(m_mod_manager.active_content_files, base_paths, {}); // base_paths now contains everything
+    // This logic is a simplified version of ConfigManager::save
+    bool data_written = false;
+    bool content_written = false;
+    std::string line;
+
+    while (std::getline(original_file, line)) {
+        std::string trimmed_line = trim(line);
+        if (trimmed_line.rfind("data=", 0) == 0) {
+            if (!data_written) {
+                fs::path original_cfg_dir = m_app_context.path_openmw_cfg.parent_path();
+                for (const auto& path : m_mod_manager.active_data_paths) {
+                    fs::path abs_path = fs::absolute(path, original_cfg_dir);
+                    temp_file << "data=\"" << abs_path.string() << "\"\n";
+                }
+                data_written = true;
+            }
+        } else if (trimmed_line.rfind("content=", 0) == 0 || trimmed_line.rfind("#content=", 0) == 0) {
+            if (!content_written) {
+                for (const auto& cf : m_mod_manager.active_content_files) {
+                    if (cf.enabled) temp_file << "content=\"" << cf.name << "\"\n";
+                    else temp_file << "#content=\"" << cf.name << "\"\n";
+                }
+                content_written = true;
+            }
+        } else {
+            temp_file << line << "\n";
+        }
+    }
+    return true;
 }
 
 void ModEngine::delete_mod_data(const std::vector<fs::path>& paths_to_delete) {
@@ -234,4 +247,105 @@ void ModEngine::delete_mod_data(const std::vector<fs::path>& paths_to_delete) {
             fs::remove_all(path);
         }
     }
+}
+void ModEngine::save_configuration() {
+    LOG_INFO("Saving configuration to ", m_app_context.path_openmw_cfg.string());
+    ConfigData data_to_save;
+    data_to_save.data_paths = m_mod_manager.active_data_paths;
+    data_to_save.content_files = m_mod_manager.active_content_files;
+    m_config_manager.save(m_app_context.path_openmw_cfg, data_to_save);
+}
+
+void ModEngine::run_active_sorter(ScriptRegistration type) {
+    fs::path sorter_path = (type == ScriptRegistration::SORT_DATA)
+        ? m_script_manager.get_active_data_sorter_path()
+        : m_script_manager.get_active_content_sorter_path();
+
+    if (sorter_path.empty()) return;
+    ScriptDefinition* script = m_script_manager.get_script_by_path(sorter_path);
+    if (!script) return;
+
+    // The runner handles its own temp config. We just call it.
+    HeadlessScriptRunner runner(*m_state_machine, *script);
+    auto result = runner.run({}, true); // use_temp_cfg = true
+
+    if (result.return_code == 0 && result.modified_cfg_path) {
+        LOG_INFO("Sorter script succeeded. Applying changes.");
+        auto new_config_data_ptr = ConfigParser::read_config(*result.modified_cfg_path);
+        if (new_config_data_ptr) {
+            const auto& new_config_data = *new_config_data_ptr;
+            
+            // --- THIS IS THE FIX ---
+            // 1. Create a map of absolute paths to their original path objects.
+            std::map<fs::path, fs::path> abs_to_original_path_map;
+            fs::path original_cfg_dir = m_app_context.path_openmw_cfg.parent_path();
+            for (const auto& original_path : m_mod_manager.active_data_paths) {
+                abs_to_original_path_map[fs::absolute(original_path, original_cfg_dir)] = original_path;
+            }
+
+            // 2. Rebuild the data path list, converting back to original objects.
+            std::vector<fs::path> new_sorted_data_paths;
+            for (const auto& new_abs_path : new_config_data.data_paths) {
+                if (abs_to_original_path_map.count(new_abs_path)) {
+                    new_sorted_data_paths.push_back(abs_to_original_path_map[new_abs_path]);
+                } else {
+                    // This is a fallback in case the script added a new path
+                    new_sorted_data_paths.push_back(new_abs_path);
+                }
+            }
+            m_mod_manager.active_data_paths = new_sorted_data_paths;
+            
+            // 3. Rebuild the content list (this part was already correct).
+            std::map<std::string, ContentFile> old_cf_map;
+            for(const auto& cf : m_mod_manager.active_content_files) old_cf_map[cf.name] = cf;
+
+            std::vector<ContentFile> final_content_files;
+            for(const auto& new_cf : new_config_data.content_files) {
+                final_content_files.push_back(ContentFile{
+                    new_cf.name, 
+                    new_cf.enabled, 
+                    old_cf_map.count(new_cf.name) ? old_cf_map[new_cf.name].source_mod : "Unknown"
+                });
+            }
+            m_mod_manager.active_content_files = final_content_files;
+
+            // 4. Finally, sync the UI state based on the new, correct lists.
+            m_mod_manager.sync_ui_state_from_active_lists();
+        }
+    } else {
+        LOG_ERROR("Sorter script failed with code ", result.return_code, ". No changes applied.");
+    }
+}
+
+
+void ModEngine::run_active_verifier() {
+    fs::path verifier_path = m_script_manager.get_active_content_verifier_path();
+    if (verifier_path.empty()) return;
+    ScriptDefinition* script = m_script_manager.get_script_by_path(verifier_path);
+    if (!script) return;
+    
+    // Verifier needs a temp config, but also a UI.
+    if (script->has_output) {
+        auto runner = std::make_shared<UIScriptRunner>(*m_state_machine, *script);
+        auto scene = std::make_unique<ScriptRunnerScene>(*m_state_machine, runner, *script, true); // Pass use_temp_cfg=true
+        m_state_machine->push_scene(std::move(scene));
+    } else {
+        HeadlessScriptRunner runner(*m_state_machine, *script);
+        runner.run({}, true);
+    }
+}
+
+
+bool ModEngine::has_active_sorter(ScriptRegistration type) const {
+    if (type == ScriptRegistration::SORT_DATA) {
+        return !m_script_manager.get_active_data_sorter_path().empty();
+    }
+    if (type == ScriptRegistration::SORT_CONTENT) {
+        return !m_script_manager.get_active_content_sorter_path().empty();
+    }
+    return false;
+}
+
+bool ModEngine::has_active_verifier() const {
+    return !m_script_manager.get_active_content_verifier_path().empty();
 }

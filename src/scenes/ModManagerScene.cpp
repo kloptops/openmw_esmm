@@ -1,4 +1,5 @@
 #include "ModManagerScene.h"
+#include "ExtractorScene.h"
 #include "../core/StateMachine.h"
 #include "../core/ModEngine.h"
 #include "imgui.h"
@@ -140,10 +141,9 @@ void ModManagerScene::render() {
                 for(size_t i = 0; i < archive_manager.archives.size(); ++i) {
                     if (p_state->archive_selection[i]) to_extract.push_back(archive_manager.archives[i]);
                 }
-                if (!to_extract.empty())
-                {
+                if (!to_extract.empty()) {
                     p_state->needs_refresh = true;
-                    m_state_machine.push_extractor_scene(to_extract);
+                    m_state_machine.push_scene(std::make_unique<ExtractorScene>(m_state_machine, to_extract));
                 }
             }
 
@@ -284,10 +284,17 @@ void ModManagerScene::render() {
         if (ImGui::BeginTabItem("Content File Order")) {
             ImGui::Text("A to toggle, D-Pad to navigate, L1/R1 to reorder.");
     
-            if (engine.mlox_rules_loaded()) {
+            if (engine.has_active_sorter(ScriptRegistration::SORT_CONTENT)) {
                 ImGui::SameLine();
-                if (ImGui::Button("[Mlox Auto-Sort]")) {
-                    engine.sort_content_files_by_mlox();
+                if (ImGui::Button("Sort Content")) {
+                    engine.run_active_sorter(ScriptRegistration::SORT_CONTENT);
+                }
+            }
+
+            if (engine.has_active_verifier()) {
+                ImGui::SameLine();
+                if (ImGui::Button("Verify Content")) {
+                    engine.run_active_verifier();
                 }
             }
 
@@ -340,12 +347,14 @@ void ModManagerScene::render() {
         // --- TAB 3: DATA PATH ORDER ---
         if (ImGui::BeginTabItem("Data Path Order")) {
             ImGui::Text("D-Pad to navigate, L1/R1 to reorder.");
-            if (engine.sort_rules_loaded()) {
+
+            if (engine.has_active_sorter(ScriptRegistration::SORT_DATA)) {
                 ImGui::SameLine();
-                if (ImGui::Button("[Auto-Sort]")) {
-                    engine.sort_data_paths_by_rules();
+                if (ImGui::Button("Sort Data")) {
+                    engine.run_active_sorter(ScriptRegistration::SORT_DATA);
                 }
             }
+
             ImGui::Separator();
             ImGui::BeginChild("DataList", ImVec2(0, -50), true);
             

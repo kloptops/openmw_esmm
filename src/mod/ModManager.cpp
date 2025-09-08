@@ -162,26 +162,22 @@ void ModManager::scan_mods(const fs::path& mod_data_path) {
     }
 }
 
-// --- sync_state_from_config is unchanged ---
-void ModManager::sync_state_from_config(const std::vector<std::string>& active_data, const std::vector<std::string>& active_content) {
-    std::set<std::string> data_set(active_data.begin(), active_data.end());
-    std::set<std::string> content_set(active_content.begin(), active_content.end());
+void ModManager::sync_ui_state_from_active_lists() {
+    std::set<std::string> data_set;
+    for(const auto& p : active_data_paths) data_set.insert(p.string());
 
     for (auto& mod : mod_definitions) {
         bool is_mod_active = false;
         for (auto& group : mod.option_groups) {
             for (auto& option : group.options) {
+                // Check if this option's path is in the active set
                 if (data_set.count(option.path.string())) {
                     option.enabled = true;
                     is_mod_active = true;
+                } else {
+                    option.enabled = false;
                 }
             }
-        }
-        for (auto& plugin : mod.standalone_plugins) {
-             if (!plugin.discovered_plugins.empty() && content_set.count(plugin.discovered_plugins[0])) {
-                plugin.enabled = true;
-                is_mod_active = true;
-             }
         }
         mod.enabled = is_mod_active;
     }

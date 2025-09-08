@@ -1,10 +1,15 @@
 #include "MainMenuScene.h"
-#include "../core/StateMachine.h" // The key include
+#include "ScriptRunner.h"
+#include "../core/StateMachine.h"
 #include "../AppContext.h"
 #include "imgui.h"
+#include "ModManagerScene.h"
+#include "UtilitiesScene.h"
+#include "SettingsScene.h"
+
 
 MainMenuScene::MainMenuScene(StateMachine& machine) : Scene(machine) {
-    m_options = {"Load Morrowind", "Mod Manager", "Settings", "Quit"};
+    m_options = {"Load Morrowind", "Mod Manager", "Utilities", "Settings", "Quit"};
     set_default = true;
 }
 
@@ -22,17 +27,32 @@ void MainMenuScene::handle_event(SDL_Event& e) {
 
 void MainMenuScene::on_select(int i) {
     switch (i) {
-        case 0:
-            m_state_machine.get_context().running = false;
-            m_state_machine.get_context().exit_code = 0;
+        case 0: { // Load Morrowind
+            auto& engine = m_state_machine.get_engine();
+            auto scripts_to_run = engine.get_script_manager_mut()->get_scripts_by_registration(ScriptRegistration::RUN_BEFORE_LAUNCH);
+            
+            bool should_launch = true;
+            if (!scripts_to_run.empty()) {
+                PreLaunchScriptRunner runner(m_state_machine, scripts_to_run);
+                should_launch = runner.run();
+            }
+
+            if (should_launch) {
+                m_state_machine.get_context().running = false;
+                m_state_machine.get_context().exit_code = 0;
+            }
             break;
+        }
         case 1:
-            m_state_machine.push_state(StateID::ModManager);
+            m_state_machine.push_scene(std::make_unique<ModManagerScene>(m_state_machine));
             break;
         case 2:
-            m_state_machine.push_state(StateID::Settings);
+            m_state_machine.push_scene(std::make_unique<UtilitiesScene>(m_state_machine));
             break;
         case 3:
+            m_state_machine.push_scene(std::make_unique<SettingsScene>(m_state_machine));
+            break;
+        case 4:
             m_state_machine.get_context().running = false;
             m_state_machine.get_context().exit_code = 255;
             break;
