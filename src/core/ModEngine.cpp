@@ -265,10 +265,11 @@ void ModEngine::run_active_sorter(ScriptRegistration type) {
     ScriptDefinition* script = m_script_manager.get_script_by_path(sorter_path);
     if (!script) return;
 
-    // The runner handles its own temp config. We just call it.
+    // --- FIX 4: Correctly run and get result ---
     HeadlessScriptRunner runner(*m_state_machine, *script);
-    auto result = runner.run({}, true); // use_temp_cfg = true
-
+    runner.run({}, true); // This is a blocking call
+    const ScriptRunResult& result = runner.get_result(); // Get the result after it's done
+    
     if (result.return_code == 0 && result.modified_cfg_path) {
         LOG_INFO("Sorter script succeeded. Applying changes.");
         auto new_config_data_ptr = ConfigParser::read_config(*result.modified_cfg_path);
@@ -348,4 +349,16 @@ bool ModEngine::has_active_sorter(ScriptRegistration type) const {
 
 bool ModEngine::has_active_verifier() const {
     return !m_script_manager.get_active_content_verifier_path().empty();
+}
+
+void ModEngine::add_running_script(ScriptRunner* runner) {
+    m_running_scripts.insert(runner);
+}
+
+void ModEngine::remove_running_script(ScriptRunner* runner) {
+    m_running_scripts.erase(runner);
+}
+
+const std::set<ScriptRunner*>& ModEngine::get_running_scripts() const {
+    return m_running_scripts;
 }

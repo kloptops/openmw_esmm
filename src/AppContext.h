@@ -6,12 +6,16 @@
 
 namespace fs = boost::filesystem;
 
+class ModEngine;
+
 struct AppContext {
     // SDL & State
     SDL_Window* window = nullptr;
     SDL_Renderer* renderer = nullptr;
     TTF_Font* font = nullptr;
     SDL_GameController* controller = nullptr;
+    ModEngine* engine = nullptr;
+
     bool running = true;
     int exit_code = 0;
 

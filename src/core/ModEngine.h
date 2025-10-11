@@ -6,8 +6,10 @@
 #include "../AppContext.h"
 #include <vector>
 #include <string>
+#include <set>
 
 // Forward declare this to avoid a circular reference.
+class ScriptRunner;
 class StateMachine;
 
 // Forward declarations
@@ -46,6 +48,10 @@ public:
     StateMachine& get_state_machine();
     void set_state_machine(StateMachine& machine);
 
+    void add_running_script(ScriptRunner* runner);
+    void remove_running_script(ScriptRunner* runner);
+    const std::set<ScriptRunner*>& get_running_scripts() const;
+
 private:
     void discover_mod_definitions();
 
@@ -59,4 +65,6 @@ private:
 
     bool m_is_initialized = false;
     std::vector<fs::path> m_mod_source_dirs;
+
+    std::set<ScriptRunner*> m_running_scripts;
 };

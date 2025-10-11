@@ -1,4 +1,5 @@
 #pragma once
+#include <csignal>
 #include <string>
 #include <vector>
 #include <map>
@@ -33,9 +34,15 @@ public:
     virtual ~ScriptRunner() = default;
 
     // The main execution entry point
-    virtual ScriptRunResult run(const std::map<std::string, std::string>& extra_vars = {}, bool use_temp_cfg = false);
+    virtual void run(const std::map<std::string, std::string>& extra_vars = {}, bool use_temp_cfg = false);
 
     void request_cancellation();
+
+    pid_t get_pid() const { return m_pid; }
+
+    bool is_finished() const { return m_is_finished; }
+    const ScriptRunResult& get_result() const { return m_result; } 
+    ScriptDefinition& get_script() { return m_script; } // Needed for a clean implementation later
 
 protected:
     // Overridden by subclasses to handle output and state changes
@@ -50,7 +57,12 @@ protected:
     ScriptDefinition& m_script;
     ProgressState m_progress;
 
+    pid_t m_pid = -1;
+
     fs::path m_cancel_file_path;
+
+    bool m_is_finished = false;
+    ScriptRunResult m_result;
 };
 
 class HeadlessScriptRunner : public ScriptRunner {

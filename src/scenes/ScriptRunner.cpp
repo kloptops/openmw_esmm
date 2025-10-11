@@ -8,21 +8,25 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <unistd.h>
+#include <sys/wait.h>
 
 // --- ScriptRunner Base Class ---
 
 ScriptRunner::ScriptRunner(StateMachine& machine, ScriptDefinition& script)
     : m_state_machine(machine), m_script(script) {}
 
-ScriptRunResult ScriptRunner::run(const std::map<std::string, std::string>& extra_vars, bool use_temp_cfg) {
+void ScriptRunner::run(const std::map<std::string, std::string>& extra_vars, bool use_temp_cfg) {
     auto& engine = m_state_machine.get_engine();
     auto& ctx = m_state_machine.get_context();
+    
+    // Create the error result upfront
+    m_result.return_code = -1;
 
     m_cancel_file_path = fs::temp_directory_path() / fs::unique_path("esmm-cancel-%%%%");
-
+    
     fs::path temp_dir;
     std::map<std::string, std::string> final_vars = extra_vars;
-
     final_vars["$CANCEL_FILE"] = m_cancel_file_path.string();
 
     if (use_temp_cfg) {
@@ -30,26 +34,53 @@ ScriptRunResult ScriptRunner::run(const std::map<std::string, std::string>& extr
         fs::create_directories(temp_dir);
         fs::path temp_cfg_path = temp_dir / "openmw.cfg";
         if (!engine.write_temporary_cfg(temp_cfg_path)) {
-            return {-1, "Failed to write temporary config"};
+            m_result.output = "Failed to write temporary config";
+            on_finish(-1);
+            return;
         }
         final_vars["$OPENMW_CFG"] = temp_cfg_path.string();
     }
+    
+    std::string command_str = engine.get_script_manager_mut()->build_command_string(m_script, ctx, final_vars);
+    command_str += " 2>&1";
 
-    std::string command = engine.get_script_manager_mut()->build_command_string(m_script, ctx, final_vars);
-    command += " 2>&1"; // Always redirect stderr
-
-    LOG_INFO("Executing command: ", command);
-
-    FILE* pipe = popen(command.c_str(), "r");
-    if (!pipe) {
-        return {-1, "Failed to execute command"};
+    int pipe_fd[2];
+    if (pipe(pipe_fd) == -1) {
+        m_result.output = "Failed to create pipe";
+        on_finish(-1);
+        return; // Return without a value
     }
+
+    m_pid = fork();
+    if (m_pid == -1) {
+        m_result.output = "Failed to fork process";
+        on_finish(-1);
+        return; // Return without a value
+    }
+
+    if (m_pid == 0) { // Child process
+        close(pipe_fd[0]);
+        dup2(pipe_fd[1], STDOUT_FILENO);
+        dup2(pipe_fd[1], STDERR_FILENO);
+        close(pipe_fd[1]);
+        
+        // Use /bin/sh -c to handle complex commands and arguments correctly
+        execl("/bin/sh", "sh", "-c", command_str.c_str(), (char*) NULL);
+        _exit(127); // If execl fails
+    }
+    
+    // Parent process
+    close(pipe_fd[1]);
+    
+    engine.add_running_script(this); // Register with engine for cleanup
+
+    FILE* pipe_stream = fdopen(pipe_fd[0], "r");
 
     // --- THIS IS THE NEW, ROBUST READING LOOP ---
     std::string line_buffer;
     std::string full_output;
     int ch;
-    while ((ch = fgetc(pipe)) != EOF) {
+    while ((ch = fgetc(pipe_stream)) != EOF) {
         full_output += static_cast<char>(ch);
         if (ch == '\n') { // Only process on newline
             parse_line(line_buffer);
@@ -64,25 +95,24 @@ ScriptRunResult ScriptRunner::run(const std::map<std::string, std::string>& extr
     }
     // --- END OF NEW LOOP ---
 
-    int return_code = pclose(pipe);
+    int status;
+    waitpid(m_pid, &status, 0);
+    int return_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+    
     on_finish(return_code);
 
-    ScriptRunResult result;
-    result.return_code = return_code;
-    result.output = full_output;
+    m_result.return_code = return_code;
+    m_result.output = full_output;
     if (use_temp_cfg) {
-        result.modified_cfg_path = std::make_unique<fs::path>(temp_dir / "openmw.cfg");
+        m_result.modified_cfg_path = std::make_unique<fs::path>(temp_dir / "openmw.cfg");
     }
-
-    if (fs::exists(m_cancel_file_path)) {
-        fs::remove(m_cancel_file_path);
-    }
-
+    
+    // Temp dir cleanup now belongs to the caller of the synchronous run
+    // for (auto runner) we'll handle it there. For UIScenes, the scene exit handles it.
+    // For simplicity, we'll keep cleanup here for now.
     if (!temp_dir.empty()) {
         fs::remove_all(temp_dir);
     }
-
-    return result;
 }
 
 void ScriptRunner::request_cancellation() {
@@ -152,27 +182,24 @@ void ScriptRunner::on_line_received(const std::string& line) {
 
 void ScriptRunner::on_progress_update() {}
 void ScriptRunner::on_alert(const AlertInfo& alert) {}
-void ScriptRunner::on_finish(int return_code) {}
+void ScriptRunner::on_finish(int return_code) {
+    m_is_finished = true;
+}
 
 
 // --- HeadlessScriptRunner ---
 void HeadlessScriptRunner::on_alert(const AlertInfo& alert) {
-    m_alert_triggered = true; // Set the flag
-    
-    // We still log it, but now we also push the AlertScene to block execution.
-    // This is crucial for pre-launch scripts.
-    LOG_WARN("SCRIPT ALERT [", alert.title, "]: ", alert.message);
+    m_alert_triggered = true;
+    LOG_WARN("[SCRIPT ALERT] [", alert.title, "]: ", alert.message);
 
     auto alert_scene = std::make_unique<AlertScene>(m_state_machine, alert.title, alert.message);
-    size_t initial_stack_size = m_state_machine.get_stack_size();
+    size_t stack_size = m_state_machine.get_stack_size();
     m_state_machine.push_scene(std::move(alert_scene));
-    
-    while (m_state_machine.get_stack_size() > initial_stack_size) {
+
+    while (m_state_machine.get_stack_size() > stack_size) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 }
-
-
 
 // --- UIScriptRunner ---
 UIScriptRunner::UIScriptRunner(StateMachine& machine, ScriptDefinition& script)
@@ -208,6 +235,7 @@ void UIScriptRunner::on_alert(const AlertInfo& alert) {
 }
 
 void UIScriptRunner::on_finish(int return_code) {
+    ScriptRunner::on_finish(return_code); // Call base implementation
     if (m_scene_ptr) m_scene_ptr->m_is_finished = true;
 }
 
@@ -217,35 +245,61 @@ PreLaunchScriptRunner::PreLaunchScriptRunner(StateMachine& machine, const std::v
     : m_state_machine(machine), m_scripts(scripts) {}
 
 bool PreLaunchScriptRunner::run() {
-    bool all_succeeded = true;
+    bool all_succeeded = true; 
     for (auto* script : m_scripts) {
         if (!script->enabled) continue;
+        
+        // --- THIS IS THE CORRECTED LOGIC ---
+        const ScriptRunResult* result_ptr = nullptr;
 
-        // Pre-launch scripts are always headless unless they trigger an alert.
-        HeadlessScriptRunner runner(m_state_machine, *script);
-        ScriptRunResult result = runner.run();
+        if (script->has_output) {
+            auto runner = std::make_shared<UIScriptRunner>(m_state_machine, *script);
+            auto scene = std::make_unique<ScriptRunnerScene>(m_state_machine, runner, *script, false);
+            m_state_machine.push_scene(std::move(scene));
 
-        // The only reason to fail the launch is if a script explicitly fails (non-zero exit)
-        if (result.return_code != 0) {
-            all_succeeded = false;
-            
-            // If the script didn't already send an alert, we create a generic one.
-            if (result.output.find("ESMM::ALERT") == std::string::npos) {
-                std::string title = "Pre-Launch Script Failed";
-                std::string message = "The script '" + script->title + "' failed with exit code " 
-                                      + std::to_string(result.return_code) + ".\n\nLaunch aborted.\n\nOutput:\n" + result.output;
-
-                auto alert_scene = std::make_unique<AlertScene>(m_state_machine, title, message);
-                size_t initial_stack_size = m_state_machine.get_stack_size();
-                m_state_machine.push_scene(std::move(alert_scene));
-
-                while (m_state_machine.get_stack_size() > initial_stack_size) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                }
+            // Wait for the script to finish by polling the runner's state
+            while(!runner->is_finished()) {
+                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                 // We must process state changes to allow the new scene to be pushed and rendered
+                 m_state_machine.update(); 
+                 // In a real game engine, you'd integrate this into the main loop,
+                 // but for this blocking operation, a mini-loop is acceptable.
             }
-            break; // Stop processing further scripts after a failure
+            // After the loop, the scene will pop itself, so we don't need to manage it.
+            result_ptr = &runner->get_result();
+
+        } else {
+            HeadlessScriptRunner runner(m_state_machine, *script);
+            runner.run(); // This is a blocking call
+            result_ptr = &runner.get_result();
+        }
+
+        // Now, dereference the pointer to get the result
+        const ScriptRunResult& result = *result_ptr;
+
+        if (result.return_code == 2) { // Special exit code for user cancel
+             LOG_INFO("Script '", script->title, "' was cancelled by the user. Aborting launch.");
+             all_succeeded = false;
+             break;
+        }
+
+        if (result.return_code != 0) {
+             all_succeeded = false;
+             if (result.output.find("ESMM::ALERT") == std::string::npos) {
+                 std::string title = "Pre-Launch Script Failed";
+                 std::string message = "The script '" + script->title + "' failed with exit code " 
+                                       + std::to_string(result.return_code) + ".\n\nLaunch aborted.\n\nOutput:\n" + result.output;
+                 auto alert_scene = std::make_unique<AlertScene>(m_state_machine, title, message);
+                 size_t initial_stack_size = m_state_machine.get_stack_size();
+                 m_state_machine.push_scene(std::move(alert_scene));
+                 while (m_state_machine.get_stack_size() > initial_stack_size) {
+                     std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                     m_state_machine.update(); // Process state changes to handle the pop
+                 }
+             }
+             break;
         }
     }
+
     return all_succeeded;
 }
-
