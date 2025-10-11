@@ -153,9 +153,32 @@ void ScriptManager::load_options(const fs::path& options_file) {
             std::string val = trim(line.substr(eq_pos + 1));
 
             if (current_section == "config") { // NEW: Handle sorters
-                if (key == "active_data_sorter") m_active_data_sorter = val;
-                if (key == "active_content_sorter") m_active_content_sorter = val;
-                if (key == "active_content_verifier") m_active_content_verifier = val;
+                LOG_INFO("Script Config: ", key, "=", val);
+                if (key == "active_data_sorter") {
+                    // Find the script with this filename and store its full path
+                    for (const auto& script : m_scripts) {
+                        if (script.script_path.filename().string() == val) {
+                            m_active_data_sorter = script.script_path;
+                            break;
+                        }
+                    }
+                }
+                if (key == "active_content_sorter") {
+                    for (const auto& script : m_scripts) {
+                        if (script.script_path.filename().string() == val) {
+                            m_active_content_sorter = script.script_path;
+                            break;
+                        }
+                    }
+                }
+                if (key == "active_content_verifier") {
+                     for (const auto& script : m_scripts) {
+                        if (script.script_path.filename().string() == val) {
+                            m_active_content_verifier = script.script_path;
+                            break;
+                        }
+                    }
+                }
             } else if (current_section == "scripts") { // Handle enabled status
                 for (auto& script : m_scripts) {
                     if (script.script_path.filename().string() == key) {

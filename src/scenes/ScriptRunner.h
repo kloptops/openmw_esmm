@@ -99,15 +99,3 @@ private:
     
     ScriptRunnerScene* m_scene_ptr = nullptr;
 };
-
-class PreLaunchScriptRunner {
-public:
-    PreLaunchScriptRunner(StateMachine& machine, const std::vector<ScriptDefinition*>& scripts);
-
-    // Runs all scripts sequentially and returns true if the game should launch
-    bool run();
-
-private:
-    StateMachine& m_state_machine;
-    std::vector<ScriptDefinition*> m_scripts;
-};

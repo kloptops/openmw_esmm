@@ -288,6 +288,7 @@ void ModManagerScene::render() {
                 ImGui::SameLine();
                 if (ImGui::Button("Sort Content")) {
                     engine.run_active_sorter(ScriptRegistration::SORT_CONTENT);
+                    p_state->needs_refresh = true;
                 }
             }
 
@@ -352,6 +353,7 @@ void ModManagerScene::render() {
                 ImGui::SameLine();
                 if (ImGui::Button("Sort Data")) {
                     engine.run_active_sorter(ScriptRegistration::SORT_DATA);
+                    p_state->needs_refresh = true;
                 }
             }
 

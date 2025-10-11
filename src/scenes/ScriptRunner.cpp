@@ -110,9 +110,11 @@ void ScriptRunner::run(const std::map<std::string, std::string>& extra_vars, boo
     // Temp dir cleanup now belongs to the caller of the synchronous run
     // for (auto runner) we'll handle it there. For UIScenes, the scene exit handles it.
     // For simplicity, we'll keep cleanup here for now.
-    if (!temp_dir.empty()) {
-        fs::remove_all(temp_dir);
-    }
+
+    // FUCK YOU.
+    // if (!temp_dir.empty()) {
+    //     fs::remove_all(temp_dir);
+    // }
 }
 
 void ScriptRunner::request_cancellation() {
@@ -239,67 +241,3 @@ void UIScriptRunner::on_finish(int return_code) {
     if (m_scene_ptr) m_scene_ptr->m_is_finished = true;
 }
 
-
-// --- PreLaunchScriptRunner ---
-PreLaunchScriptRunner::PreLaunchScriptRunner(StateMachine& machine, const std::vector<ScriptDefinition*>& scripts)
-    : m_state_machine(machine), m_scripts(scripts) {}
-
-bool PreLaunchScriptRunner::run() {
-    bool all_succeeded = true; 
-    for (auto* script : m_scripts) {
-        if (!script->enabled) continue;
-        
-        // --- THIS IS THE CORRECTED LOGIC ---
-        const ScriptRunResult* result_ptr = nullptr;
-
-        if (script->has_output) {
-            auto runner = std::make_shared<UIScriptRunner>(m_state_machine, *script);
-            auto scene = std::make_unique<ScriptRunnerScene>(m_state_machine, runner, *script, false);
-            m_state_machine.push_scene(std::move(scene));
-
-            // Wait for the script to finish by polling the runner's state
-            while(!runner->is_finished()) {
-                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                 // We must process state changes to allow the new scene to be pushed and rendered
-                 m_state_machine.update(); 
-                 // In a real game engine, you'd integrate this into the main loop,
-                 // but for this blocking operation, a mini-loop is acceptable.
-            }
-            // After the loop, the scene will pop itself, so we don't need to manage it.
-            result_ptr = &runner->get_result();
-
-        } else {
-            HeadlessScriptRunner runner(m_state_machine, *script);
-            runner.run(); // This is a blocking call
-            result_ptr = &runner.get_result();
-        }
-
-        // Now, dereference the pointer to get the result
-        const ScriptRunResult& result = *result_ptr;
-
-        if (result.return_code == 2) { // Special exit code for user cancel
-             LOG_INFO("Script '", script->title, "' was cancelled by the user. Aborting launch.");
-             all_succeeded = false;
-             break;
-        }
-
-        if (result.return_code != 0) {
-             all_succeeded = false;
-             if (result.output.find("ESMM::ALERT") == std::string::npos) {
-                 std::string title = "Pre-Launch Script Failed";
-                 std::string message = "The script '" + script->title + "' failed with exit code " 
-                                       + std::to_string(result.return_code) + ".\n\nLaunch aborted.\n\nOutput:\n" + result.output;
-                 auto alert_scene = std::make_unique<AlertScene>(m_state_machine, title, message);
-                 size_t initial_stack_size = m_state_machine.get_stack_size();
-                 m_state_machine.push_scene(std::move(alert_scene));
-                 while (m_state_machine.get_stack_size() > initial_stack_size) {
-                     std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                     m_state_machine.update(); // Process state changes to handle the pop
-                 }
-             }
-             break;
-        }
-    }
-
-    return all_succeeded;
-}

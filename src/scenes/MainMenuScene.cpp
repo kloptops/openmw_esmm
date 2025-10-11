@@ -1,5 +1,6 @@
 #include "MainMenuScene.h"
 #include "ScriptRunner.h"
+#include "PreLaunchScene.h"
 #include "../core/StateMachine.h"
 #include "../AppContext.h"
 #include "imgui.h"
@@ -31,13 +32,20 @@ void MainMenuScene::on_select(int i) {
             auto& engine = m_state_machine.get_engine();
             auto scripts_to_run = engine.get_script_manager_mut()->get_scripts_by_registration(ScriptRegistration::RUN_BEFORE_LAUNCH);
             
-            bool should_launch = true;
-            if (!scripts_to_run.empty()) {
-                PreLaunchScriptRunner runner(m_state_machine, scripts_to_run);
-                should_launch = runner.run();
+            // Check if there are any scripts that are actually enabled
+            bool any_enabled = false;
+            for(const auto* script : scripts_to_run) {
+                if(script->enabled) {
+                    any_enabled = true;
+                    break;
+                }
             }
 
-            if (should_launch) {
+            if (any_enabled) {
+                // If there are enabled scripts, push the interactive PreLaunchScene
+                m_state_machine.push_scene(std::make_unique<PreLaunchScene>(m_state_machine, scripts_to_run));
+            } else {
+                // If no scripts are enabled, exit immediately to launch the game
                 m_state_machine.get_context().running = false;
                 m_state_machine.get_context().exit_code = 0;
             }

@@ -248,6 +248,8 @@ void ModEngine::delete_mod_data(const std::vector<fs::path>& paths_to_delete) {
         }
     }
 }
+
+
 void ModEngine::save_configuration() {
     LOG_INFO("Saving configuration to ", m_app_context.path_openmw_cfg.string());
     ConfigData data_to_save;
@@ -255,6 +257,7 @@ void ModEngine::save_configuration() {
     data_to_save.content_files = m_mod_manager.active_content_files;
     m_config_manager.save(m_app_context.path_openmw_cfg, data_to_save);
 }
+
 
 void ModEngine::run_active_sorter(ScriptRegistration type) {
     fs::path sorter_path = (type == ScriptRegistration::SORT_DATA)
@@ -265,38 +268,44 @@ void ModEngine::run_active_sorter(ScriptRegistration type) {
     ScriptDefinition* script = m_script_manager.get_script_by_path(sorter_path);
     if (!script) return;
 
-    // --- FIX 4: Correctly run and get result ---
     HeadlessScriptRunner runner(*m_state_machine, *script);
-    runner.run({}, true); // This is a blocking call
-    const ScriptRunResult& result = runner.get_result(); // Get the result after it's done
+    runner.run({}, true);
+    const ScriptRunResult& result = runner.get_result();
+
+    // This is the variable we need to clean up
+    fs::path temp_dir_to_cleanup;
+    if (result.modified_cfg_path) {
+        temp_dir_to_cleanup = result.modified_cfg_path->parent_path();
+    }
     
     if (result.return_code == 0 && result.modified_cfg_path) {
         LOG_INFO("Sorter script succeeded. Applying changes.");
         auto new_config_data_ptr = ConfigParser::read_config(*result.modified_cfg_path);
         if (new_config_data_ptr) {
             const auto& new_config_data = *new_config_data_ptr;
-            
-            // --- THIS IS THE FIX ---
-            // 1. Create a map of absolute paths to their original path objects.
+
+            LOG_INFO("--- Parsed Data Paths from Temp Config ---");
+            for(const auto& p : new_config_data.data_paths) LOG_INFO(p.string());
+
+            LOG_INFO("--- Data Load Order BEFORE Applying ---");
+            for(const auto& p : m_mod_manager.active_data_paths) LOG_INFO(p.string());
+
             std::map<fs::path, fs::path> abs_to_original_path_map;
             fs::path original_cfg_dir = m_app_context.path_openmw_cfg.parent_path();
             for (const auto& original_path : m_mod_manager.active_data_paths) {
                 abs_to_original_path_map[fs::absolute(original_path, original_cfg_dir)] = original_path;
             }
 
-            // 2. Rebuild the data path list, converting back to original objects.
             std::vector<fs::path> new_sorted_data_paths;
             for (const auto& new_abs_path : new_config_data.data_paths) {
                 if (abs_to_original_path_map.count(new_abs_path)) {
                     new_sorted_data_paths.push_back(abs_to_original_path_map[new_abs_path]);
                 } else {
-                    // This is a fallback in case the script added a new path
                     new_sorted_data_paths.push_back(new_abs_path);
                 }
             }
             m_mod_manager.active_data_paths = new_sorted_data_paths;
             
-            // 3. Rebuild the content list (this part was already correct).
             std::map<std::string, ContentFile> old_cf_map;
             for(const auto& cf : m_mod_manager.active_content_files) old_cf_map[cf.name] = cf;
 
@@ -310,11 +319,18 @@ void ModEngine::run_active_sorter(ScriptRegistration type) {
             }
             m_mod_manager.active_content_files = final_content_files;
 
-            // 4. Finally, sync the UI state based on the new, correct lists.
+            LOG_INFO("--- Data Load Order AFTER applying ---");
+            for(const auto& p : m_mod_manager.active_data_paths) LOG_INFO(p.string());
+
             m_mod_manager.sync_ui_state_from_active_lists();
         }
     } else {
         LOG_ERROR("Sorter script failed with code ", result.return_code, ". No changes applied.");
+    }
+    
+    // Correctly clean up the temp directory
+    if (!temp_dir_to_cleanup.empty() && fs::exists(temp_dir_to_cleanup)) {
+        fs::remove_all(temp_dir_to_cleanup);
     }
 }
 
