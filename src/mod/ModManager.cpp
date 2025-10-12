@@ -5,7 +5,7 @@
 #include <set>
 
 // Uncomment this line to get verbose output from the parser to the console
-#define DEBUG_PARSER
+// #define DEBUG_PARSER
 
 // =============================================================================
 // HELPER FUNCTIONS
@@ -145,7 +145,6 @@ ModDefinition parse_mod_directory(const fs::path& mod_root_path) {
 // MOD MANAGER CLASS IMPLEMENTATION
 // =============================================================================
 
-// --- scan_mods is unchanged ---
 void ModManager::scan_mods(const fs::path& mod_data_path) {
     mod_definitions.clear();
     if (!fs::exists(mod_data_path) || !fs::is_directory(mod_data_path)) {
@@ -185,9 +184,7 @@ void ModManager::sync_ui_state_from_active_lists() {
 
 void ModManager::update_active_lists() {
     // --- PART 1: DATA PATHS ---
-
-    // 1. Get a set of all data paths that SHOULD be active from the mod configuration.
-    // This is now the single source of truth.
+    // This is the same as before: update active_data_paths based on UI checkboxes.
     std::set<fs::path> enabled_data_paths;
     for (const auto& mod : mod_definitions) {
         if (!mod.enabled) continue;
@@ -200,58 +197,61 @@ void ModManager::update_active_lists() {
         }
     }
 
-    // 2. Preserve the order of existing paths as much as possible, and remove disabled ones.
     std::vector<fs::path> new_active_data_paths;
     std::set<fs::path> paths_in_new_list;
-
     for (const auto& path : active_data_paths) {
         if (enabled_data_paths.count(path)) {
             new_active_data_paths.push_back(path);
             paths_in_new_list.insert(path);
         }
     }
-
-    // 3. Add any newly enabled paths that weren't in the original list.
     for (const auto& path : enabled_data_paths) {
         if (paths_in_new_list.find(path) == paths_in_new_list.end()) {
             new_active_data_paths.push_back(path);
         }
     }
-    
-    // 4. Replace the old list.
     active_data_paths = new_active_data_paths;
 
-    // --- PART 2: CONTENT FILES (UPDATED LOGIC) ---
+    // --- PART 2: CONTENT FILES (NEW, SIMPLER LOGIC) ---
+    
+    // A. Discover all plugins available in the *new* set of active data paths.
     std::map<std::string, std::string> available_plugins; // map<plugin_name, source_mod>
-    for (const auto& mod : mod_definitions) {
-        if (!mod.enabled) continue;
-        for (const auto& group : mod.option_groups) {
-            for (const auto& option : group.options) {
-                if (option.enabled) {
-                    for (const auto& plugin_name : option.discovered_plugins) {
-                        available_plugins[plugin_name] = mod.name;
+    for (const auto& p : active_data_paths) {
+        // Find which mod definition this data path belongs to
+        std::string source_mod_name = "Unknown";
+        bool found = false;
+        for (const auto& mod : mod_definitions) {
+            for (const auto& group : mod.option_groups) {
+                for (const auto& option : group.options) {
+                    if (option.path == p) {
+                        source_mod_name = mod.name;
+                        found = true; break;
                     }
                 }
+                if (found) break;
             }
+            if (found) break;
+        }
+        for (const auto& plugin_name : find_plugins_in_path(p)) {
+            available_plugins[plugin_name] = source_mod_name;
         }
     }
 
+    // B. Rebuild the active_content_files list.
     std::vector<ContentFile> new_active_content_files;
     std::set<std::string> plugins_in_new_list;
 
-    // First pass: Preserve existing plugins, their order, and their state.
-    for (const auto& existing_content_file : active_content_files) {
-        if (available_plugins.count(existing_content_file.name)) {
-            // It still exists, so we keep it. is_new will be false by default.
-            new_active_content_files.push_back(existing_content_file);
-            plugins_in_new_list.insert(existing_content_file.name);
+    // First pass: Preserve the order and state of existing files that are still available.
+    for (const auto& existing_cf : active_content_files) {
+        if (available_plugins.count(existing_cf.name)) {
+            new_active_content_files.push_back(existing_cf);
+            plugins_in_new_list.insert(existing_cf.name);
         }
     }
 
-    // Second pass: Add any brand new plugins that have just become available.
+    // Second pass: Add any brand new, discovered plugins to the end as disabled.
     for (const auto& pair : available_plugins) {
         if (plugins_in_new_list.find(pair.first) == plugins_in_new_list.end()) {
-            // This is a newly discovered plugin.
             ContentFile new_file;
             new_file.name = pair.first;
             new_file.enabled = false;   // Set to DISABLED by default.
@@ -263,4 +263,3 @@ void ModManager::update_active_lists() {
     
     active_content_files = new_active_content_files;
 }
-

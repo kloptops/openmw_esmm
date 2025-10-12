@@ -1,6 +1,7 @@
 #pragma once
 #include <vector>
 #include <memory>
+#include <mutex>
 #include "../scenes/Scene.h"
 #include "ModEngine.h"
 
@@ -37,4 +38,5 @@ private:
         std::unique_ptr<Scene> scene;
     };
     std::vector<PendingChange> m_pending_changes;
+    std::mutex m_pending_changes_mutex;
 };

@@ -19,19 +19,33 @@ void StateMachine::render() {
 }
 
 void StateMachine::push_scene(std::unique_ptr<Scene> scene) {
+    std::lock_guard<std::mutex> lock(m_pending_changes_mutex);
     m_pending_changes.push_back({PendingChange::Push, std::move(scene)});
 }
 
 void StateMachine::pop_state() {
+    std::lock_guard<std::mutex> lock(m_pending_changes_mutex);
     m_pending_changes.push_back({PendingChange::Pop, nullptr});
 }
 
 void StateMachine::change_scene(std::unique_ptr<Scene> scene) {
+    std::lock_guard<std::mutex> lock(m_pending_changes_mutex);
     m_pending_changes.push_back({PendingChange::Change, std::move(scene)});
 }
 
 void StateMachine::process_state_changes() {
-    for (auto& change : m_pending_changes) {
+    // To prevent deadlocks, we copy the pending changes inside a lock
+    // and then process them outside the lock.
+    std::vector<PendingChange> changes_to_process;
+    {
+        std::lock_guard<std::mutex> lock(m_pending_changes_mutex);
+        if (m_pending_changes.empty()) {
+            return;
+        }
+        changes_to_process.swap(m_pending_changes);
+    }
+
+    for (auto& change : changes_to_process) {
         switch (change.action) {
             case PendingChange::Push:
                 if (change.scene) {
@@ -60,6 +74,5 @@ void StateMachine::process_state_changes() {
         }
     }
 
-    m_pending_changes.clear();
     if (m_states.empty()) m_context.running = false;
 }

@@ -4,6 +4,7 @@
 #include <vector>
 #include <map>
 #include <memory>
+#include <chrono>
 #include "../mod/ScriptManager.h" // For ScriptDefinition
 #include "../core/ModEngine.h"
 
@@ -30,6 +31,8 @@ struct ScriptRunResult {
 
 class ScriptRunner {
 public:
+    enum class CancelState { NONE, REQUESTED, KILLED };
+
     ScriptRunner(StateMachine& machine, ScriptDefinition& script);
     virtual ~ScriptRunner() = default;
 
@@ -37,12 +40,17 @@ public:
     virtual void run(const std::map<std::string, std::string>& extra_vars = {}, bool use_temp_cfg = false);
 
     void request_cancellation();
+    void kill_process();
 
     pid_t get_pid() const { return m_pid; }
 
     bool is_finished() const { return m_is_finished; }
     const ScriptRunResult& get_result() const { return m_result; } 
     ScriptDefinition& get_script() { return m_script; } // Needed for a clean implementation later
+
+    // --- NEW Getters ---
+    CancelState get_cancel_state() const { return m_cancel_state; }
+    std::chrono::steady_clock::time_point get_cancel_request_time() const { return m_cancel_request_time; }
 
 protected:
     // Overridden by subclasses to handle output and state changes
@@ -63,6 +71,10 @@ protected:
 
     bool m_is_finished = false;
     ScriptRunResult m_result;
+
+    // --- NEW Members ---
+    CancelState m_cancel_state = CancelState::NONE;
+    std::chrono::steady_clock::time_point m_cancel_request_time;
 };
 
 class HeadlessScriptRunner : public ScriptRunner {

@@ -26,5 +26,7 @@ struct AppContext {
     fs::path path_openmw_cfg;
     fs::path path_config_dir;
 
+    bool is_momw_config = false;
+
     ~AppContext();
 };

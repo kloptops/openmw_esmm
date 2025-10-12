@@ -7,6 +7,7 @@
 #include "ModManagerScene.h"
 #include "UtilitiesScene.h"
 #include "SettingsScene.h"
+#include "AlertScene.h"
 
 
 MainMenuScene::MainMenuScene(StateMachine& machine) : Scene(machine) {
@@ -52,7 +53,15 @@ void MainMenuScene::on_select(int i) {
             break;
         }
         case 1:
-            m_state_machine.push_scene(std::make_unique<ModManagerScene>(m_state_machine));
+            if (m_state_machine.get_context().is_momw_config) {
+                m_state_machine.push_scene(std::make_unique<AlertScene>(
+                    m_state_machine,
+                    "Feature Disabled",
+                    "The Mod Manager is disabled because your openmw.cfg is managed by another tool (MOMW)."
+                ));
+            } else {
+                m_state_machine.push_scene(std::make_unique<ModManagerScene>(m_state_machine));
+            }
             break;
         case 2:
             m_state_machine.push_scene(std::make_unique<UtilitiesScene>(m_state_machine));

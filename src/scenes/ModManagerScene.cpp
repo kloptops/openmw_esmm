@@ -320,7 +320,6 @@ void ModManagerScene::render() {
                 if (ImGui::Checkbox(content.name.c_str(), &content.enabled)) {
                     // If the user interacts with it, it's no longer "new"
                     content.is_new = false;
-                    state_changed = true;
                 }
                 if (ImGui::IsItemFocused()) { p_state->focused_content_idx = i; }
 
@@ -402,7 +401,9 @@ void ModManagerScene::render() {
         ImGui::EndTabBar();
     }
 
-    if (state_changed) { mod_manager.update_active_lists(); }
+    if (state_changed) {
+        mod_manager.update_active_lists();
+    }
 
     if (ImGui::Button("Save and Exit", ImVec2(150, 40))) {
         // --- NEW VALIDATION LOGIC ---

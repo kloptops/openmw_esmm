@@ -8,6 +8,7 @@
 #include <iostream>
 #include <boost/filesystem/path.hpp>
 #include <fstream>
+#include <chrono>
 
 namespace fs = boost::filesystem;
 
@@ -38,7 +39,7 @@ void ScriptRunnerScene::render() {
         ImGui::Text("%s", m_progress.name.c_str());
         float progress_fraction = (m_progress.total > 0) ? (float)m_progress.step / m_progress.total : 0.0f;
         ImGui::ProgressBar(progress_fraction, ImVec2(-1, 0));
-        ImGui::Text("%s (%d / %d)", m_progress.message.c_str(), m_progress.step, m_progress.total);
+        ImGui::Text("%5d / %5d: %s ", m_progress.step, m_progress.total, m_progress.message.c_str());
         ImGui::Separator();
     }
 
@@ -67,22 +68,44 @@ void ScriptRunnerScene::render() {
             m_state_machine.pop_state();
         }
     } else if (m_script.can_cancel) {
-        // Re-enable the cancel button and hook it up
-        if (ImGui::Button("Cancel", ImVec2(-1, 40))) {
-            m_owner->request_cancellation();
+        auto cancel_state = m_owner->get_cancel_state();
+        if (cancel_state == ScriptRunner::CancelState::NONE) {
+            if (ImGui::Button("Cancel", ImVec2(-1, 40))) {
+                m_owner->request_cancellation();
+            }
+        } else {
+            auto time_since_cancel = std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::steady_clock::now() - m_owner->get_cancel_request_time()
+            ).count();
+
+            if (time_since_cancel < 5) {
+                ImGui::BeginDisabled();
+                ImGui::Button("Cancelling...", ImVec2(-1, 40));
+                ImGui::EndDisabled();
+            } else {
+                // Style the button red to indicate a destructive action
+                ImGui::PushStyleColor(ImGuiCol_Button, (ImVec4)ImColor::HSV(0.0f, 0.8f, 0.8f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, (ImVec4)ImColor::HSV(0.0f, 0.9f, 0.9f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, (ImVec4)ImColor::HSV(0.0f, 1.0f, 1.0f));
+                if (ImGui::Button("Kill Process", ImVec2(-1, 40))) {
+                    m_owner->kill_process();
+                }
+                ImGui::PopStyleColor(3);
+            }
         }
     } else {
         ImGui::Dummy(ImVec2(-1, 40));
     }
     
     // --- Alert Modal ---
+    const std::string popup_id = m_alert.title + "##AlertPopup";
     if (m_show_alert) {
-        ImGui::OpenPopup(m_alert.title.c_str());
+        ImGui::OpenPopup(popup_id.c_str());
         m_show_alert = false; // Reset trigger
     }
 
     // Use a unique ID for the popup in case of multiple alerts
-    if (ImGui::BeginPopupModal((m_alert.title + "##AlertPopup").c_str(), NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
+    if (ImGui::BeginPopupModal(popup_id.c_str(), NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::TextWrapped("%s", m_alert.message.c_str());
         ImGui::Separator();
         if (ImGui::Button("OK", ImVec2(120, 0))) { 

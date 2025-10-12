@@ -1,5 +1,6 @@
 #include "ConfigParser.h"
 #include "../utils/Utils.h"
+#include "../utils/Logger.h"
 #include <fstream>
 #include <map>
 
@@ -19,6 +20,7 @@ static std::string extractAndCleanValue(const std::string& line, const std::stri
 
 
 std::unique_ptr<ConfigData> ConfigParser::read_config(const fs::path& cfg_path) {
+    LOG_DEBUG("Reading ", cfg_path);
     std::ifstream file(cfg_path.string());
     if (!file.is_open()) return nullptr; // Return null pointer on failure
 
@@ -29,6 +31,7 @@ std::unique_ptr<ConfigData> ConfigParser::read_config(const fs::path& cfg_path) 
     std::string line;
     while (std::getline(file, line)) {
         std::string trimmed_line = trim(line);
+        LOG_DEBUG("- ", trimmed_line);
         if (trimmed_line.rfind("data=", 0) == 0) {
             config_data->data_paths.emplace_back(extractAndCleanValue(line, "data="));
         } else if (trimmed_line.rfind("content=", 0) == 0) {

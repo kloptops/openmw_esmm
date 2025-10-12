@@ -3,12 +3,14 @@
 #include "../mod/ConfigParser.h"
 #include "../scenes/ScriptRunner.h"
 #include "../scenes/ScriptRunnerScene.h"
+#include "../scenes/AlertScene.h"
 #include "../utils/Logger.h"
 #include "../utils/Utils.h"
 #include <set>
 #include <vector>
 #include <algorithm>
 #include <map>
+#include <fstream>
 
 // Helper to find the common base path for a list of paths
 static fs::path find_common_base(const std::vector<fs::path>& paths) {
@@ -124,7 +126,7 @@ void ModEngine::discover_mod_definitions() {
 void ModEngine::rescan_mods() {
     LOG_INFO("Rescanning installed mods...");
     discover_mod_definitions();
-    m_mod_manager.sync_ui_state_from_active_lists(); // Use the renamed function
+    m_mod_manager.sync_ui_state_from_active_lists();
     LOG_INFO("Mod rescan complete.");
 }
 
@@ -132,20 +134,83 @@ void ModEngine::initialize() {
     if (m_is_initialized) return;
     LOG_INFO("ModEngine: Initializing...");
 
-    // 1. Load support systems
+    // --- MOMW check ---
+    std::ifstream cfg_file_check(m_app_context.path_openmw_cfg.string());
+    if (cfg_file_check.is_open()) {
+        std::string line;
+        for (int i = 0; i < 10 && std::getline(cfg_file_check, line); ++i) {
+            if (line.find("GENERATED WITH MOMW CONFIGURATOR") != std::string::npos) {
+                m_app_context.is_momw_config = true;
+                LOG_WARN("MOMW-generated openmw.cfg detected. Mod management features will be disabled.");
+                break;
+            }
+        }
+        cfg_file_check.close();
+    }
+
+    // 1. Load support systems and initial config
     m_script_manager.scan_scripts(m_app_context.path_config_dir / "scripts");
     m_script_manager.load_options(m_app_context.path_config_dir / "openmw_esmm_options.cfg");
     m_config_manager.load(m_app_context.path_openmw_cfg);
     
-    // 2. Discover all available mods from the filesystem. This populates m_mod_manager.mod_definitions
-    discover_mod_definitions();
-
-    // 3. Set the active lists in ModManager directly from the loaded config. This is the source of truth.
     const auto& loaded_cfg = m_config_manager.get_loaded_data();
     m_mod_manager.active_data_paths = loaded_cfg.data_paths;
     m_mod_manager.active_content_files = loaded_cfg.content_files;
 
-    // 4. Enrich the active_content_files with source_mod info found during discovery
+    // --- PRUNING & DISCOVERY LOGIC ON STARTUP ---
+    // A. Prune data paths that no longer exist.
+    m_mod_manager.active_data_paths.erase(
+        std::remove_if(m_mod_manager.active_data_paths.begin(), m_mod_manager.active_data_paths.end(),
+            [](const fs::path& p) {
+                if (!fs::exists(p)) {
+                    LOG_WARN("Pruning missing data path: ", p.string());
+                    return true;
+                }
+                return false;
+            }),
+        m_mod_manager.active_data_paths.end());
+
+    // B. Build a set of all plugins that are currently available in the (now-pruned) data paths.
+    std::set<std::string> available_plugins;
+    for (const auto& p : m_mod_manager.active_data_paths) {
+        auto plugins_in_path = find_plugins_in_path(p);
+        available_plugins.insert(plugins_in_path.begin(), plugins_in_path.end());
+    }
+
+    // C. Prune content files that can no longer be found.
+    m_mod_manager.active_content_files.erase(
+        std::remove_if(m_mod_manager.active_content_files.begin(), m_mod_manager.active_content_files.end(),
+            [&](const ContentFile& cf) {
+                if (available_plugins.find(cf.name) == available_plugins.end()) {
+                    LOG_WARN("Pruning missing content file: ", cf.name);
+                    return true;
+                }
+                return false;
+            }),
+        m_mod_manager.active_content_files.end());
+
+    // D. Discover any new plugins in the data paths that aren't in the content list yet.
+    std::set<std::string> existing_plugins;
+    for(const auto& cf : m_mod_manager.active_content_files) {
+        existing_plugins.insert(cf.name);
+    }
+    for(const auto& plugin_name : available_plugins) {
+        if(existing_plugins.find(plugin_name) == existing_plugins.end()) {
+            LOG_INFO("Discovered new plugin on startup: ", plugin_name);
+            ContentFile new_file;
+            new_file.name = plugin_name;
+            new_file.enabled = false;   // Add as disabled
+            new_file.source_mod = "Unknown"; // Source will be updated below
+            new_file.is_new = true;
+            m_mod_manager.active_content_files.push_back(new_file);
+        }
+    }
+    // --- END PRUNING & DISCOVERY ---
+
+    // 2. Discover all mod definitions from the filesystem.
+    discover_mod_definitions();
+    
+    // 3. Update source mod info for all content files.
     std::map<std::string, std::string> all_plugins_map;
     for(const auto& mod : m_mod_manager.mod_definitions) {
         for(const auto& group : mod.option_groups) for(const auto& option : group.options) for(const auto& plugin : option.discovered_plugins) {
@@ -158,10 +223,10 @@ void ModEngine::initialize() {
         }
     }
 
-    // 5. NOW, sync the UI state (checkboxes) based on the true active lists we just established
+    // 4. Sync the UI state (checkboxes) based on the final, correct lists.
     m_mod_manager.sync_ui_state_from_active_lists();
 
-    // 6. Scan archives and perform initial sort
+    // 5. Scan archives and perform initial sort
     m_archive_manager.scan_archives(m_app_context.path_mod_archives, m_app_context.path_mod_data);
     LOG_INFO("Performing initial sort of core game files...");
 
@@ -198,6 +263,10 @@ void ModEngine::rescan_archives() {
 
 
 bool ModEngine::write_temporary_cfg(const fs::path& temp_cfg_path) {
+    if (m_app_context.is_momw_config) {
+        LOG_ERROR("Cannot write temporary config, openmw.cfg is managed by MOMW.");
+        return false;
+    }
     std::ifstream original_file(m_app_context.path_openmw_cfg.string());
     if (!original_file.is_open()) {
         LOG_ERROR("Could not open original openmw.cfg to create temporary copy.");
@@ -242,8 +311,41 @@ bool ModEngine::write_temporary_cfg(const fs::path& temp_cfg_path) {
 }
 
 void ModEngine::delete_mod_data(const std::vector<fs::path>& paths_to_delete) {
+    // 1. Identify which mods are being deleted by their root path.
+    std::set<std::string> deleted_mod_names;
+    for (const auto& mod : m_mod_manager.mod_definitions) {
+        for (const auto& path_to_del : paths_to_delete) {
+            if (mod.root_path == path_to_del) {
+                deleted_mod_names.insert(mod.name);
+                break;
+            }
+        }
+    }
+
+    // 2. Remove associated data paths.
+    auto& data_paths = m_mod_manager.active_data_paths;
+    data_paths.erase(std::remove_if(data_paths.begin(), data_paths.end(),
+        [&](const fs::path& p) {
+            for (const auto& del_path : paths_to_delete) {
+                // Check if p is inside del_path
+                if (p.string().find(del_path.string()) == 0) {
+                    return true;
+                }
+            }
+            return false;
+        }), data_paths.end());
+
+    // 3. Remove associated content files using the source_mod name.
+    auto& content_files = m_mod_manager.active_content_files;
+    content_files.erase(std::remove_if(content_files.begin(), content_files.end(),
+        [&](const ContentFile& cf) {
+            return deleted_mod_names.count(cf.source_mod) > 0;
+        }), content_files.end());
+
+    // 4. Finally, delete the actual files from the disk.
     for (const auto& path : paths_to_delete) {
         if (fs::exists(path)) {
+            LOG_INFO("Deleting mod data at: ", path.string());
             fs::remove_all(path);
         }
     }
@@ -251,6 +353,10 @@ void ModEngine::delete_mod_data(const std::vector<fs::path>& paths_to_delete) {
 
 
 void ModEngine::save_configuration() {
+    if (m_app_context.is_momw_config) {
+        LOG_ERROR("Cannot save configuration, openmw.cfg is managed by MOMW.");
+        return;
+    }
     LOG_INFO("Saving configuration to ", m_app_context.path_openmw_cfg.string());
     ConfigData data_to_save;
     data_to_save.data_paths = m_mod_manager.active_data_paths;
@@ -260,6 +366,15 @@ void ModEngine::save_configuration() {
 
 
 void ModEngine::run_active_sorter(ScriptRegistration type) {
+    if (m_app_context.is_momw_config) {
+        m_state_machine->push_scene(std::make_unique<AlertScene>(
+            *m_state_machine,
+            "Feature Disabled",
+            "Sorting is disabled because your openmw.cfg is managed by another tool (MOMW)."
+        ));
+        return;
+    }
+
     fs::path sorter_path = (type == ScriptRegistration::SORT_DATA)
         ? m_script_manager.get_active_data_sorter_path()
         : m_script_manager.get_active_content_sorter_path();

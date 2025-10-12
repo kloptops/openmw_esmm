@@ -1,6 +1,7 @@
 #include "UtilitiesScene.h"
 #include "ScriptRunner.h"
 #include "ScriptRunnerScene.h"
+#include "AlertScene.h"
 #include "../core/StateMachine.h"
 #include "../core/ModEngine.h"
 #include "ScriptRunner.h"
@@ -51,6 +52,10 @@ void UtilitiesScene::render() {
     auto& all_scripts = script_manager.get_all_scripts_mut();
     for (auto& script : all_scripts) {
         const std::string id = "##" + script.script_path.string();
+        bool is_sorter = script.registration == ScriptRegistration::SORT_DATA ||
+                         script.registration == ScriptRegistration::SORT_CONTENT;
+        bool is_momw_config = m_state_machine.get_context().is_momw_config;
+
         ImGui::Text("%s", script.title.c_str());
         ImGui::Indent();
         ImGui::BeginDisabled();
@@ -61,16 +66,24 @@ void UtilitiesScene::render() {
         ImGui::Dummy(ImVec2(0, 10.0f));
 
         if (ImGui::Button(("Run" + id).c_str())) {
-            if (script.has_output) {
-                auto runner = std::make_shared<UIScriptRunner>(m_state_machine, script);
-                
-                // Provide the 'use_temp_cfg' argument, which is false for generic scripts.
-                auto scene = std::make_unique<ScriptRunnerScene>(m_state_machine, runner, script, false);
-
-                m_state_machine.push_scene(std::move(scene));
+            if (is_sorter && is_momw_config) {
+                m_state_machine.push_scene(std::make_unique<AlertScene>(
+                    m_state_machine,
+                    "Feature Disabled",
+                    "Sorting scripts are disabled because your openmw.cfg is managed by Modding OpenMW."
+                ));
             } else {
-                HeadlessScriptRunner runner(m_state_machine, script);
-                runner.run(); // Generic headless scripts don't use temp cfg by default
+                if (script.has_output) {
+                    auto runner = std::make_shared<UIScriptRunner>(m_state_machine, script);
+                    
+                    // Provide the 'use_temp_cfg' argument, which is false for generic scripts.
+                    auto scene = std::make_unique<ScriptRunnerScene>(m_state_machine, runner, script, false);
+
+                    m_state_machine.push_scene(std::move(scene));
+                } else {
+                    HeadlessScriptRunner runner(m_state_machine, script);
+                    runner.run(); // Generic headless scripts don't use temp cfg by default
+                }
             }
         }
 

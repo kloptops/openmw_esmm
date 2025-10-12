@@ -11,8 +11,8 @@ AppContext::~AppContext()
         for (ScriptRunner* runner : engine->get_running_scripts()) {
             pid_t pid = runner->get_pid();
             if (pid > 0) {
-                LOG_WARN("Terminating orphaned script process with PID: ", pid);
-                kill(pid, SIGTERM);
+                LOG_WARN("Killing orphaned script processes with PID: ", pid);
+                kill(-pid, SIGKILL);
             }
         }
     }

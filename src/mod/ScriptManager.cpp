@@ -249,14 +249,17 @@ std::string ScriptManager::build_command_string(
     // Base variables
     variables["$OPENMW_CFG"] = ctx.path_openmw_cfg.string();
     variables["$OPENMW_ESMM_INI"] = (ctx.path_config_dir / "openmw_esmm.ini").string();
+    variables["$OPENMW_DIR"] = ctx.path_config_dir.string();
     variables["$MOD_DATA"] = ctx.path_mod_data.string();
-    
-    // Extra variables (e.g., from a runner)
-    variables.insert(extra_vars.begin(), extra_vars.end());
 
     // Script-defined options
     for (const auto& opt : script.config_options) {
         variables["$" + opt.name] = opt.current_value;
+    }
+
+    // Extra variables (e.g., from a runner)
+    for (const auto& pair : extra_vars) {
+        variables[pair.first] = pair.second;
     }
 
     for (const auto& pair : variables) {

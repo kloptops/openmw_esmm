@@ -10,6 +10,7 @@
 #include <chrono>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <fstream>
 
 // --- ScriptRunner Base Class ---
 
@@ -118,10 +119,20 @@ void ScriptRunner::run(const std::map<std::string, std::string>& extra_vars, boo
 }
 
 void ScriptRunner::request_cancellation() {
-    if (!m_cancel_file_path.empty()) {
+    if (m_cancel_state == CancelState::NONE && !m_cancel_file_path.empty()) {
         LOG_INFO("Cancellation requested. Creating cancel file: ", m_cancel_file_path.string());
+        m_cancel_state = CancelState::REQUESTED;
+        m_cancel_request_time = std::chrono::steady_clock::now();
         std::ofstream cancel_file(m_cancel_file_path.string());
         cancel_file.close();
+    }
+}
+
+void ScriptRunner::kill_process() {
+    if (m_pid > 0 && !m_is_finished) {
+        LOG_WARN("Force killing process group with PID: ", m_pid);
+        kill(-m_pid, SIGKILL);
+        m_cancel_state = CancelState::KILLED;
     }
 }
 
@@ -186,6 +197,10 @@ void ScriptRunner::on_progress_update() {}
 void ScriptRunner::on_alert(const AlertInfo& alert) {}
 void ScriptRunner::on_finish(int return_code) {
     m_is_finished = true;
+    m_state_machine.get_engine().remove_running_script(this);
+    if (!m_cancel_file_path.empty() && fs::exists(m_cancel_file_path)) {
+        fs::remove(m_cancel_file_path);
+    }
 }
 
 
@@ -194,13 +209,10 @@ void HeadlessScriptRunner::on_alert(const AlertInfo& alert) {
     m_alert_triggered = true;
     LOG_WARN("[SCRIPT ALERT] [", alert.title, "]: ", alert.message);
 
+    // This may be called from a background thread. The StateMachine must be thread-safe.
+    // We no longer block waiting for the alert to close, which fixes a deadlock.
     auto alert_scene = std::make_unique<AlertScene>(m_state_machine, alert.title, alert.message);
-    size_t stack_size = m_state_machine.get_stack_size();
     m_state_machine.push_scene(std::move(alert_scene));
-
-    while (m_state_machine.get_stack_size() > stack_size) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
 }
 
 // --- UIScriptRunner ---
@@ -240,4 +252,3 @@ void UIScriptRunner::on_finish(int return_code) {
     ScriptRunner::on_finish(return_code); // Call base implementation
     if (m_scene_ptr) m_scene_ptr->m_is_finished = true;
 }
-
