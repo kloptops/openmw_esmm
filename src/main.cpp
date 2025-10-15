@@ -1,6 +1,7 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <dlfcn.h>
 
 #include "AppContext.h"
 #include "utils/Logger.h"
@@ -23,6 +24,26 @@ namespace fs = boost::filesystem;
 
 
 int main(int argc, char* argv[]) {
+    void* gl_handle = dlopen("libGL.so.1", RTLD_LAZY | RTLD_GLOBAL);
+    if (!gl_handle) {
+        std::cerr << "Warning: Could not pre-load libGL.so.1: " << dlerror() << std::endl;
+        // This is not fatal; we can still let SDL try to load it.
+    }
+
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) < 0)
+    {
+        // Use std::cerr here because the logger might not be set up yet.
+        std::cerr << "FATAL: SDL could not initialize! SDL_Error: " << SDL_GetError() << std::endl;
+        return 1;
+    }
+
+    if (TTF_Init() == -1)
+    {
+        std::cerr << "FATAL: SDL_ttf could not initialize! TTF_Error: " << TTF_GetError() << std::endl;
+        SDL_Quit();
+        return 1;
+    }
+
     // --- Get Base Path from Executable Location ---
     // This is much more reliable than using "."
     fs::path base_path;
@@ -73,19 +94,6 @@ int main(int argc, char* argv[]) {
     ctx.exec_7zz             = vm.count("7zz")          ? fs::path(vm["7zz"].as<std::string>())          : base_path / "7zzs";
     ctx.path_mod_archives    = vm.count("mod-archives") ? fs::path(vm["mod-archives"].as<std::string>()) : base_path / "mods/";
 
-    // --- Standard Init ---
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) < 0)
-    {
-        LOG_ERROR("SDL could not initialize! SDL_Error: ", SDL_GetError());
-        return 0;
-    }
-
-    if (TTF_Init() == -1)
-    {
-        LOG_ERROR("SDL_ttf could not initialize! TTF_Error: ", TTF_GetError());
-        return 0;
-    }
-
     SDL_DisplayMode dm;
     if (SDL_GetDesktopDisplayMode(0, &dm) != 0) {
         LOG_ERROR("SDL_GetDesktopDisplayMode failed: ", SDL_GetError());
@@ -93,6 +101,8 @@ int main(int argc, char* argv[]) {
         dm.h = 480; // Fallback
     }
     LOG_INFO("Desktop resolution: ", dm.w, "x", dm.h);
+
+    SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
 
     const float BASE_WIDTH = 640.0f;
     const float BASE_HEIGHT = 480.0f;
@@ -108,7 +118,7 @@ int main(int argc, char* argv[]) {
         logical_height = BASE_WIDTH / native_aspect;
     }
 
-    ctx.window = SDL_CreateWindow("OpenMW ESMM", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, dm.w, dm.h, SDL_WINDOW_SHOWN | SDL_WINDOW_FULLSCREEN_DESKTOP);
+    ctx.window = SDL_CreateWindow("OpenMW ESMM", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, dm.w, dm.h, SDL_WINDOW_SHOWN | SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_OPENGL);
     if (!ctx.window) {
         LOG_ERROR("Window could not be created! SDL_Error: ", SDL_GetError());
         return 1;

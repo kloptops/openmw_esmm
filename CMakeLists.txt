@@ -44,4 +44,5 @@ target_link_libraries(openmw_esmm PUBLIC
     ${SDL2_TTF_LIBRARIES}
     ${SDL2_LIBRARIES}
     ${Boost_LIBRARIES}
+    dl
 )
